@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/sunfish-robotics/ulog/pkg/wire"
 )
@@ -25,6 +26,10 @@ type Reader struct {
 	header        Header
 	formats       map[string]Format
 	subscriptions map[uint16]subscription
+	information   []KeyValue
+	parameters    []KeyValue
+	logs          []LogEntry
+	dropouts      []Dropout
 	record        Record
 	err           error
 }
@@ -124,6 +129,38 @@ func (r *Reader) Err() error {
 	return r.err
 }
 
+// Information returns typed information entries encountered so far.
+func (r *Reader) Information() []KeyValue {
+	if r == nil {
+		return nil
+	}
+	return cloneKeyValues(r.information)
+}
+
+// Parameters returns parameter entries encountered so far.
+func (r *Reader) Parameters() []KeyValue {
+	if r == nil {
+		return nil
+	}
+	return cloneKeyValues(r.parameters)
+}
+
+// Logs returns tagged and untagged text messages encountered so far.
+func (r *Reader) Logs() []LogEntry {
+	if r == nil {
+		return nil
+	}
+	return append([]LogEntry(nil), r.logs...)
+}
+
+// Dropouts returns logging dropouts encountered so far.
+func (r *Reader) Dropouts() []Dropout {
+	if r == nil {
+		return nil
+	}
+	return append([]Dropout(nil), r.dropouts...)
+}
+
 func readMessage(source io.Reader) (wire.MessageType, []byte, error) {
 	var headerBytes [3]byte
 	n, err := io.ReadFull(source, headerBytes[:])
@@ -172,6 +209,26 @@ func (r *Reader) consume(messageType wire.MessageType, payload []byte) (Record, 
 			return Record{}, false, fmt.Errorf("format %q is redefined incompatibly", format.Name)
 		}
 		r.formats[format.Name] = cloneFormat(*format)
+	case wire.MessageTypeInformation:
+		var message wire.InformationMessage
+		if err := message.UnmarshalBinary(payload); err != nil {
+			return Record{}, false, fmt.Errorf("decode information message: %w", err)
+		}
+		entry, err := decodeKeyValue(message.Key, message.Value)
+		if err != nil {
+			return Record{}, false, fmt.Errorf("decode information value: %w", err)
+		}
+		r.information = append(r.information, entry)
+	case wire.MessageTypeParameter:
+		var message wire.ParameterMessage
+		if err := message.UnmarshalBinary(payload); err != nil {
+			return Record{}, false, fmt.Errorf("decode parameter message: %w", err)
+		}
+		entry, err := decodeKeyValue(message.Key, message.Value)
+		if err != nil {
+			return Record{}, false, fmt.Errorf("decode parameter value: %w", err)
+		}
+		r.parameters = append(r.parameters, entry)
 	case wire.MessageTypeSubscription:
 		var message wire.SubscriptionMessage
 		if err := message.UnmarshalBinary(payload); err != nil {
@@ -219,6 +276,32 @@ func (r *Reader) consume(messageType wire.MessageType, payload []byte) (Record, 
 			layout:    append([]layoutField(nil), subscription.layout...),
 			data:      bytes.Clone(message.Data),
 		}, true, nil
+	case wire.MessageTypeLogging:
+		var message wire.LoggingMessage
+		if err := message.UnmarshalBinary(payload); err != nil {
+			return Record{}, false, fmt.Errorf("decode logging message: %w", err)
+		}
+		r.logs = append(r.logs, LogEntry{
+			Level: LogLevel(message.Level), Timestamp: message.Timestamp, Message: message.Message,
+		})
+	case wire.MessageTypeTaggedLogging:
+		var message wire.TaggedLoggingMessage
+		if err := message.UnmarshalBinary(payload); err != nil {
+			return Record{}, false, fmt.Errorf("decode tagged logging message: %w", err)
+		}
+		r.logs = append(r.logs, LogEntry{
+			Level: LogLevel(message.Level), Timestamp: message.Timestamp, Message: message.Message,
+			Tag: message.Tag, Tagged: true,
+		})
+	case wire.MessageTypeDropout:
+		if len(payload) != binary.Size(wire.DropoutMessage{}) {
+			return Record{}, false, fmt.Errorf("dropout payload has size %d, want %d", len(payload), binary.Size(wire.DropoutMessage{}))
+		}
+		var message wire.DropoutMessage
+		if _, err := binary.Decode(payload, binary.LittleEndian, &message); err != nil {
+			return Record{}, false, fmt.Errorf("decode dropout message: %w", err)
+		}
+		r.dropouts = append(r.dropouts, Dropout{Duration: time.Duration(message.Duration) * time.Millisecond})
 	}
 
 	return Record{}, false, nil

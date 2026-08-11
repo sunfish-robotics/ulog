@@ -9,6 +9,7 @@ import (
 	"math"
 	"reflect"
 	"sync"
+	"time"
 
 	"github.com/sunfish-robotics/ulog/pkg/wire"
 )
@@ -128,6 +129,119 @@ func (w *Writer) Define(format Format) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	return w.defineLocked(format)
+}
+
+// WriteInformation writes an initial typed information entry. Information must
+// be written before the first data or log message.
+func (w *Writer) WriteInformation(name string, value any) error {
+	if w == nil {
+		return errors.New("nil ULog writer")
+	}
+	key, encoded, err := encodeKeyValue(name, value)
+	if err != nil {
+		return err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := w.requireDefinitionSectionLocked("information"); err != nil {
+		return err
+	}
+	return w.writeMessageLocked(wire.MessageTypeInformation, wire.InformationMessage{Key: key, Value: encoded})
+}
+
+// WriteParameter writes an initial int32 or float32 parameter. Parameters must
+// be written before the first data or log message.
+func (w *Writer) WriteParameter(name string, value any) error {
+	if w == nil {
+		return errors.New("nil ULog writer")
+	}
+	typ := reflect.TypeOf(value)
+	if typ == nil {
+		return fmt.Errorf("ULog parameter %q requires int32 or float32, got %T", name, value)
+	}
+	typeID, ok := primitiveTypeFor(typ)
+	if !ok || (typeID != TypeInt32 && typeID != TypeFloat32) {
+		return fmt.Errorf("ULog parameter %q requires int32 or float32, got %T", name, value)
+	}
+	key, encoded, err := encodeKeyValue(name, value)
+	if err != nil {
+		return err
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if err := w.requireDefinitionSectionLocked("parameter"); err != nil {
+		return err
+	}
+	return w.writeMessageLocked(wire.MessageTypeParameter, wire.ParameterMessage{Key: key, Value: encoded})
+}
+
+// WriteLog writes an untagged text message in the data section.
+func (w *Writer) WriteLog(level LogLevel, timestamp uint64, message string) error {
+	if w == nil {
+		return errors.New("nil ULog writer")
+	}
+	if level < LogLevelEmergency || level > LogLevelDebug {
+		return fmt.Errorf("invalid ULog log level %q", level)
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return errors.New("ULog writer is closed")
+	}
+	if w.writeErr != nil {
+		return w.writeErr
+	}
+	if err := w.startDataLocked(); err != nil {
+		return err
+	}
+	return w.writeMessageLocked(wire.MessageTypeLogging, wire.LoggingMessage{
+		Level: wire.LogLevel(level), Timestamp: timestamp, Message: message,
+	})
+}
+
+// WriteDropout writes a logging dropout in whole milliseconds.
+func (w *Writer) WriteDropout(duration time.Duration) error {
+	if w == nil {
+		return errors.New("nil ULog writer")
+	}
+	if duration < 0 || duration%time.Millisecond != 0 {
+		return fmt.Errorf("dropout duration %s must be a non-negative whole number of milliseconds", duration)
+	}
+	milliseconds := duration / time.Millisecond
+	if milliseconds > math.MaxUint16 {
+		return fmt.Errorf("dropout duration %s exceeds %d milliseconds", duration, math.MaxUint16)
+	}
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	if w.closed {
+		return errors.New("ULog writer is closed")
+	}
+	if w.writeErr != nil {
+		return w.writeErr
+	}
+	if err := w.startDataLocked(); err != nil {
+		return err
+	}
+	payload, err := binary.Append(nil, binary.LittleEndian, wire.DropoutMessage{
+		Duration: uint16(milliseconds), // #nosec G115 -- checked against MaxUint16 above.
+	})
+	if err != nil {
+		return fmt.Errorf("encode dropout: %w", err)
+	}
+	return w.writePayloadLocked(wire.MessageTypeDropout, payload)
+}
+
+func (w *Writer) requireDefinitionSectionLocked(kind string) error {
+	if w.closed {
+		return errors.New("ULog writer is closed")
+	}
+	if w.writeErr != nil {
+		return w.writeErr
+	}
+	if w.dataStarted {
+		return fmt.Errorf("cannot write initial %s after ULog data has started", kind)
+	}
+	return nil
 }
 
 func (w *Writer) defineLocked(format Format) error {
@@ -363,6 +477,10 @@ func (w *Writer) writeMessageLocked(messageType wire.MessageType, message encodi
 	if err != nil {
 		return err
 	}
+	return w.writePayloadLocked(messageType, payload)
+}
+
+func (w *Writer) writePayloadLocked(messageType wire.MessageType, payload []byte) error {
 	if err := writeFramed(w.destination, messageType, payload); err != nil {
 		w.writeErr = fmt.Errorf("write ULog %q message: %w", messageType, err)
 		return w.writeErr

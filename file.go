@@ -8,9 +8,13 @@ import (
 
 // File is an eager, column-oriented view of a ULog stream.
 type File struct {
-	header   Header
-	datasets []*Dataset
-	byKey    map[datasetKey]*Dataset
+	header      Header
+	datasets    []*Dataset
+	byKey       map[datasetKey]*Dataset
+	information []KeyValue
+	parameters  []KeyValue
+	logs        []LogEntry
+	dropouts    []Dropout
 }
 
 type datasetKey struct {
@@ -44,6 +48,10 @@ func Read(source io.Reader) (*File, error) {
 	if err := reader.Err(); err != nil {
 		return nil, err
 	}
+	file.information = reader.Information()
+	file.parameters = reader.Parameters()
+	file.logs = reader.Logs()
+	file.dropouts = reader.Dropouts()
 	return file, nil
 }
 
@@ -53,6 +61,38 @@ func (f *File) Header() Header {
 		return Header{}
 	}
 	return f.header
+}
+
+// Information returns typed information entries in file order.
+func (f *File) Information() []KeyValue {
+	if f == nil {
+		return nil
+	}
+	return cloneKeyValues(f.information)
+}
+
+// Parameters returns parameter entries in file order, including changes.
+func (f *File) Parameters() []KeyValue {
+	if f == nil {
+		return nil
+	}
+	return cloneKeyValues(f.parameters)
+}
+
+// Logs returns tagged and untagged text messages in file order.
+func (f *File) Logs() []LogEntry {
+	if f == nil {
+		return nil
+	}
+	return append([]LogEntry(nil), f.logs...)
+}
+
+// Dropouts returns logging dropouts in file order.
+func (f *File) Dropouts() []Dropout {
+	if f == nil {
+		return nil
+	}
+	return append([]Dropout(nil), f.dropouts...)
 }
 
 // Datasets returns datasets in order of their first data record.
