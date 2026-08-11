@@ -157,6 +157,24 @@ func TestReaderRejectsPartiallyEncodedFields(t *testing.T) {
 	}
 }
 
+func TestReaderRejectsNestedLayoutsLargerThanADataMessage(t *testing.T) {
+	data := newULogFixture(t, 0)
+	data.message(t, wire.MessageTypeFormat, wire.FormatMessage{Format: "inner:uint16_t value;"})
+	data.message(t, wire.MessageTypeFormat, wire.FormatMessage{Format: "outer:inner[65533] values;"})
+	data.message(t, wire.MessageTypeSubscription, wire.SubscriptionMessage{MessageID: 1, MessageName: "outer"})
+
+	reader, err := NewReader(bytes.NewReader(data.bytes()))
+	if err != nil {
+		t.Fatalf("NewReader() error = %v", err)
+	}
+	if reader.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if err := reader.Err(); err == nil || !strings.Contains(err.Error(), "maximum data payload") {
+		t.Fatalf("Err() = %v, want oversized layout error", err)
+	}
+}
+
 type ulogFixture struct {
 	data []byte
 }

@@ -10,6 +10,10 @@ import (
 // Type identifies a primitive ULog type or the name of another [Format].
 type Type string
 
+// ULog message sizes are uint16 and a data message reserves two bytes for its
+// subscription ID.
+const maxDataPayloadSize = 1<<16 - 1 - 2
+
 const (
 	// TypeInt8 identifies a signed 8-bit integer.
 	TypeInt8 Type = "int8_t"
@@ -119,6 +123,12 @@ func parseField(declaration string) (Field, error) {
 		length, err := strconv.Atoi(matches[2])
 		if err != nil {
 			return Field{}, fmt.Errorf("invalid array length %q: %w", matches[2], err)
+		}
+		if length > maxDataPayloadSize {
+			return Field{}, fmt.Errorf("array length %d exceeds maximum data payload %d", length, maxDataPayloadSize)
+		}
+		if size, primitive := primitiveSize(field.Type); primitive && length > maxDataPayloadSize/size {
+			return Field{}, fmt.Errorf("array %q requires %d bytes, maximum data payload is %d", field.Name, length*size, maxDataPayloadSize)
 		}
 		field.ArrayLength = length
 	}

@@ -39,6 +39,8 @@ func TestParseFormatRejectsMalformedDefinitions(t *testing.T) {
 		{name: "empty fields", format: "vehicle_attitude:"},
 		{name: "missing field name", format: "vehicle_attitude:uint64_t;"},
 		{name: "zero array", format: "vehicle_attitude:float[0] q;"},
+		{name: "array exceeds data message", format: "vehicle_attitude:uint8_t[65534] values;"},
+		{name: "wide array exceeds data message", format: "vehicle_attitude:uint64_t[8192] values;"},
 		{name: "invalid message name", format: "vehicle attitude:uint64_t timestamp;"},
 		{name: "invalid field name", format: "vehicle_attitude:uint64_t time-stamp;"},
 	}

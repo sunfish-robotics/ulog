@@ -349,6 +349,9 @@ func resolveFormatLayout(
 			fieldHidden := hidden || strings.HasPrefix(field.Name, "_padding")
 
 			if size, primitive := primitiveSize(field.Type); primitive {
+				if offset > maxDataPayloadSize-size {
+					return nil, 0, fmt.Errorf("format %q exceeds maximum data payload of %d bytes", name, maxDataPayloadSize)
+				}
 				layout = append(layout, layoutField{
 					name:   path,
 					typeID: field.Type,
