@@ -11,18 +11,30 @@ import (
 type Type string
 
 const (
-	TypeInt8    Type = "int8_t"
-	TypeUint8   Type = "uint8_t"
-	TypeInt16   Type = "int16_t"
-	TypeUint16  Type = "uint16_t"
-	TypeInt32   Type = "int32_t"
-	TypeUint32  Type = "uint32_t"
-	TypeInt64   Type = "int64_t"
-	TypeUint64  Type = "uint64_t"
+	// TypeInt8 identifies a signed 8-bit integer.
+	TypeInt8 Type = "int8_t"
+	// TypeUint8 identifies an unsigned 8-bit integer.
+	TypeUint8 Type = "uint8_t"
+	// TypeInt16 identifies a signed 16-bit integer.
+	TypeInt16 Type = "int16_t"
+	// TypeUint16 identifies an unsigned 16-bit integer.
+	TypeUint16 Type = "uint16_t"
+	// TypeInt32 identifies a signed 32-bit integer.
+	TypeInt32 Type = "int32_t"
+	// TypeUint32 identifies an unsigned 32-bit integer.
+	TypeUint32 Type = "uint32_t"
+	// TypeInt64 identifies a signed 64-bit integer.
+	TypeInt64 Type = "int64_t"
+	// TypeUint64 identifies an unsigned 64-bit integer.
+	TypeUint64 Type = "uint64_t"
+	// TypeFloat32 identifies a 32-bit IEEE-754 floating-point value.
 	TypeFloat32 Type = "float"
+	// TypeFloat64 identifies a 64-bit IEEE-754 floating-point value.
 	TypeFloat64 Type = "double"
-	TypeBool    Type = "bool"
-	TypeChar    Type = "char"
+	// TypeBool identifies a one-byte Boolean value.
+	TypeBool Type = "bool"
+	// TypeChar identifies a one-byte character.
+	TypeChar Type = "char"
 )
 
 // IsPrimitive reports whether t is one of ULog's built-in scalar types.
