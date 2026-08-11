@@ -17,6 +17,22 @@ type KeyValue struct {
 	Value       any
 }
 
+// DefaultParameterTypes identifies the scopes to which a default value applies.
+type DefaultParameterTypes uint8
+
+const (
+	// DefaultParameterSystemWide marks a system-wide default value.
+	DefaultParameterSystemWide DefaultParameterTypes = 1 << 0
+	// DefaultParameterCurrentConfiguration marks a default for the current configuration.
+	DefaultParameterCurrentConfiguration DefaultParameterTypes = 1 << 1
+)
+
+// DefaultParameter is a typed parameter default and its applicable scopes.
+type DefaultParameter struct {
+	KeyValue
+	Types DefaultParameterTypes
+}
+
 // LogLevel is the severity of a ULog text message.
 type LogLevel uint8
 
@@ -53,20 +69,27 @@ type Dropout struct {
 	Duration time.Duration
 }
 
-func decodeKeyValue(key string, data []byte) (KeyValue, error) {
-	field, err := parseField(key)
+func keyValueField(key string) (Field, int, error) {
+	field, err := parseKey(key)
 	if err != nil {
-		return KeyValue{}, err
+		return Field{}, 0, err
 	}
 	size, primitive := primitiveSize(field.Type)
 	if !primitive {
-		return KeyValue{}, fmt.Errorf("key %q uses non-primitive type %q", field.Name, field.Type)
+		return Field{}, 0, fmt.Errorf("key %q uses non-primitive type %q", field.Name, field.Type)
 	}
 	count := field.ArrayLength
 	if count == 0 {
 		count = 1
 	}
-	wantSize := size * count
+	return field, size * count, nil
+}
+
+func decodeKeyValue(key string, data []byte) (KeyValue, error) {
+	field, wantSize, err := keyValueField(key)
+	if err != nil {
+		return KeyValue{}, err
+	}
 	if len(data) != wantSize {
 		return KeyValue{}, fmt.Errorf("key %q has %d value bytes, want %d", field.Name, len(data), wantSize)
 	}
@@ -81,6 +104,8 @@ func decodeKeyValue(key string, data []byte) (KeyValue, error) {
 		return entry, err
 	}
 
+	size, _ := primitiveSize(field.Type)
+	count := field.ArrayLength
 	column := newColumn(field.Name, field.Type)
 	for i := range count {
 		value, err := decodePrimitive(field.Type, data[i*size:(i+1)*size])
@@ -96,7 +121,7 @@ func decodeKeyValue(key string, data []byte) (KeyValue, error) {
 }
 
 func encodeKeyValue(name string, value any) (string, []byte, error) {
-	if !fieldNamePattern.MatchString(name) {
+	if !formatNamePattern.MatchString(name) {
 		return "", nil, fmt.Errorf("invalid ULog key name %q", name)
 	}
 	if text, ok := value.(string); ok {
@@ -126,6 +151,14 @@ func cloneKeyValues(values []KeyValue) []KeyValue {
 	for i, value := range values {
 		cloned[i] = value
 		cloned[i].Value = cloneColumnValues(value.Value)
+	}
+	return cloned
+}
+
+func cloneDefaultParameters(values []DefaultParameter) []DefaultParameter {
+	cloned := append([]DefaultParameter(nil), values...)
+	for i := range cloned {
+		cloned[i].Value = cloneColumnValues(cloned[i].Value)
 	}
 	return cloned
 }

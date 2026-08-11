@@ -75,6 +75,9 @@ func ParseFormat(definition string) (*Format, error) {
 	if !formatNamePattern.MatchString(name) {
 		return nil, fmt.Errorf("invalid format name %q", name)
 	}
+	if Type(name).IsPrimitive() {
+		return nil, fmt.Errorf("format name %q collides with a primitive type", name)
+	}
 	if fieldsText == "" {
 		return nil, fmt.Errorf("format %q has no fields", name)
 	}
@@ -105,12 +108,20 @@ func ParseFormat(definition string) (*Format, error) {
 }
 
 func parseField(declaration string) (Field, error) {
+	return parseDeclaration(declaration, fieldNamePattern, "field")
+}
+
+func parseKey(declaration string) (Field, error) {
+	return parseDeclaration(declaration, formatNamePattern, "key")
+}
+
+func parseDeclaration(declaration string, namePattern *regexp.Regexp, nameKind string) (Field, error) {
 	parts := strings.Fields(declaration)
 	if len(parts) != 2 {
-		return Field{}, fmt.Errorf("invalid field declaration %q", declaration)
+		return Field{}, fmt.Errorf("invalid %s declaration %q", nameKind, declaration)
 	}
-	if !fieldNamePattern.MatchString(parts[1]) {
-		return Field{}, fmt.Errorf("invalid field name %q", parts[1])
+	if !namePattern.MatchString(parts[1]) {
+		return Field{}, fmt.Errorf("invalid %s name %q", nameKind, parts[1])
 	}
 
 	matches := typePattern.FindStringSubmatch(parts[0])
@@ -153,6 +164,19 @@ func (f Format) String() string {
 		definition.WriteByte(';')
 	}
 	return definition.String()
+}
+
+func validateSubscriptionFormat(format Format) error {
+	for _, field := range format.Fields {
+		if field.Name != "timestamp" {
+			continue
+		}
+		if field.Type != TypeUint64 || field.ArrayLength != 0 {
+			return fmt.Errorf("subscribed format %q requires scalar uint64_t timestamp", format.Name)
+		}
+		return nil
+	}
+	return fmt.Errorf("subscribed format %q requires scalar uint64_t timestamp", format.Name)
 }
 
 func primitiveSize(t Type) (int, bool) {

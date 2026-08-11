@@ -120,11 +120,11 @@ func TestWriterRejectsRegistrationAfterDataStarts(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWriter() error = %v", err)
 	}
-	stream, err := Register[typedPoint](writer)
+	stream, err := Register[typedPointSample](writer)
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
-	if err := stream.Write(typedPoint{}); err != nil {
+	if err := stream.Write(typedPointSample{}); err != nil {
 		t.Fatalf("Write() error = %v", err)
 	}
 	if _, err := Register[typedSample](writer); err == nil {
@@ -138,7 +138,7 @@ func TestRawStreamRejectsIncorrectPayloadSize(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWriter() error = %v", err)
 	}
-	format, err := ParseFormat("sample:uint32_t value;")
+	format, err := ParseFormat("sample:uint64_t timestamp;uint32_t value;")
 	if err != nil {
 		t.Fatalf("ParseFormat() error = %v", err)
 	}
@@ -148,5 +148,52 @@ func TestRawStreamRejectsIncorrectPayloadSize(t *testing.T) {
 	}
 	if err := stream.Write([]byte{1, 2}); err == nil {
 		t.Fatal("Write() succeeded with an incorrect payload size")
+	}
+}
+
+func TestRawStreamAllowsOmittedTopLevelTrailingPadding(t *testing.T) {
+	var destination bytes.Buffer
+	writer, err := NewWriter(&destination)
+	if err != nil {
+		t.Fatalf("NewWriter() error = %v", err)
+	}
+	stream, err := writer.RegisterFormat(Format{
+		Name: "padded",
+		Fields: []Field{
+			{Name: "timestamp", Type: TypeUint64},
+			{Name: "value", Type: TypeUint8},
+			{Name: "_padding0", Type: TypeUint8, ArrayLength: 3},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterFormat() error = %v", err)
+	}
+	payload := binary.LittleEndian.AppendUint64(nil, 100)
+	payload = append(payload, 7)
+	if err := stream.Write(append(bytes.Clone(payload), 0)); err == nil {
+		t.Fatal("Write() accepted partially omitted trailing padding")
+	}
+	if err := stream.Write(payload); err != nil {
+		t.Fatalf("Write() omitted trailing padding error = %v", err)
+	}
+}
+
+func TestWriterRequiresTimestampInSubscribedFormats(t *testing.T) {
+	formats := []Format{
+		{Name: "missing", Fields: []Field{{Name: "value", Type: TypeUint8}}},
+		{Name: "wrong_type", Fields: []Field{{Name: "timestamp", Type: TypeUint32}}},
+		{Name: "array", Fields: []Field{{Name: "timestamp", Type: TypeUint64, ArrayLength: 2}}},
+	}
+	for _, format := range formats {
+		t.Run(format.Name, func(t *testing.T) {
+			var destination bytes.Buffer
+			writer, err := NewWriter(&destination)
+			if err != nil {
+				t.Fatalf("NewWriter() error = %v", err)
+			}
+			if _, err := writer.RegisterFormat(format); err == nil {
+				t.Fatal("RegisterFormat() succeeded without scalar uint64_t timestamp")
+			}
+		})
 	}
 }

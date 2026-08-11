@@ -16,11 +16,11 @@ func TestReadBuildsTypedDatasets(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWriter() error = %v", err)
 	}
-	stream, err := Register[typedPoint](writer, WithMultiID(3))
+	stream, err := Register[typedPointSample](writer, WithMultiID(3), WithFormatName("typed_point"))
 	if err != nil {
 		t.Fatalf("Register() error = %v", err)
 	}
-	for _, sample := range []typedPoint{{X: -2, Y: 1.25}, {X: 7, Y: -3.5}} {
+	for _, sample := range []typedPointSample{{Timestamp: 1, X: -2, Y: 1.25}, {Timestamp: 2, X: 7, Y: -3.5}} {
 		if err := stream.Write(sample); err != nil {
 			t.Fatalf("Write() error = %v", err)
 		}
@@ -108,18 +108,18 @@ func TestFileDatasetsPreserveFirstSeenOrder(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewWriter() error = %v", err)
 	}
-	first, err := Register[typedPoint](writer, WithMultiID(2))
+	first, err := Register[typedPointSample](writer, WithMultiID(2), WithFormatName("typed_point"))
 	if err != nil {
 		t.Fatalf("Register(first) error = %v", err)
 	}
-	second, err := Register[typedPoint](writer, WithMultiID(1))
+	second, err := Register[typedPointSample](writer, WithMultiID(1), WithFormatName("typed_point"))
 	if err != nil {
 		t.Fatalf("Register(second) error = %v", err)
 	}
-	if err := second.Write(typedPoint{}); err != nil {
+	if err := second.Write(typedPointSample{}); err != nil {
 		t.Fatalf("second.Write() error = %v", err)
 	}
-	if err := first.Write(typedPoint{}); err != nil {
+	if err := first.Write(typedPointSample{}); err != nil {
 		t.Fatalf("first.Write() error = %v", err)
 	}
 	if err := writer.Close(); err != nil {

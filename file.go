@@ -13,6 +13,7 @@ type File struct {
 	byKey       map[datasetKey]*Dataset
 	information []KeyValue
 	parameters  []KeyValue
+	defaults    []DefaultParameter
 	logs        []LogEntry
 	dropouts    []Dropout
 }
@@ -50,6 +51,7 @@ func Read(source io.Reader) (*File, error) {
 	}
 	file.information = reader.Information()
 	file.parameters = reader.Parameters()
+	file.defaults = reader.DefaultParameters()
 	file.logs = reader.Logs()
 	file.dropouts = reader.Dropouts()
 	return file, nil
@@ -77,6 +79,14 @@ func (f *File) Parameters() []KeyValue {
 		return nil
 	}
 	return cloneKeyValues(f.parameters)
+}
+
+// DefaultParameters returns default parameter entries in file order.
+func (f *File) DefaultParameters() []DefaultParameter {
+	if f == nil {
+		return nil
+	}
+	return cloneDefaultParameters(f.defaults)
 }
 
 // Logs returns tagged and untagged text messages in file order.

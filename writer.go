@@ -8,6 +8,7 @@ import (
 	"io"
 	"math"
 	"reflect"
+	"strings"
 	"sync"
 	"time"
 
@@ -287,6 +288,14 @@ func (w *Writer) RegisterFormat(format Format, options ...StreamOption) (*RawStr
 	if config.formatName != "" {
 		format.Name = config.formatName
 	}
+	parsed, err := ParseFormat(format.String())
+	if err != nil {
+		return nil, err
+	}
+	format = *parsed
+	if err := validateSubscriptionFormat(format); err != nil {
+		return nil, err
+	}
 
 	w.mu.Lock()
 	defer w.mu.Unlock()
@@ -302,7 +311,13 @@ func (w *Writer) RegisterFormat(format Format, options ...StreamOption) (*RawStr
 	if err != nil {
 		return nil, err
 	}
-	return &RawStream{writer: w, registration: registration, payloadSize: layoutByteSize(layout)}, nil
+	fullSize, omittedPaddingSize := rawPayloadSizes(root, layout)
+	return &RawStream{
+		writer:             w,
+		registration:       registration,
+		payloadSize:        fullSize,
+		omittedPaddingSize: omittedPaddingSize,
+	}, nil
 }
 
 // Register derives and defines the formats for T, then registers a typed data
@@ -323,6 +338,9 @@ func Register[T any](writer *Writer, options ...StreamOption) (*Stream[T], error
 	root := &formats[len(formats)-1]
 	if config.formatName != "" {
 		root.Name = config.formatName
+	}
+	if err := validateSubscriptionFormat(*root); err != nil {
+		return nil, err
 	}
 
 	writer.mu.Lock()
@@ -401,19 +419,26 @@ func (s *Stream[T]) Write(value T) error {
 
 // RawStream writes already encoded data for one dynamic format.
 type RawStream struct {
-	writer       *Writer
-	registration *writerRegistration
-	payloadSize  int
+	writer             *Writer
+	registration       *writerRegistration
+	payloadSize        int
+	omittedPaddingSize int
 }
 
-// Write writes one format-defined payload. The payload must encode every field
-// in the registered format.
+// Write writes one format-defined payload. Top-level trailing padding may be
+// omitted as permitted by ULog; all other fields must be encoded.
 func (s *RawStream) Write(payload []byte) error {
 	if s == nil || s.writer == nil {
 		return errors.New("nil ULog raw stream")
 	}
-	if len(payload) != s.payloadSize {
-		return fmt.Errorf("raw payload has size %d, want %d", len(payload), s.payloadSize)
+	if len(payload) != s.payloadSize && len(payload) != s.omittedPaddingSize {
+		if s.omittedPaddingSize == s.payloadSize {
+			return fmt.Errorf("raw payload has size %d, want %d", len(payload), s.payloadSize)
+		}
+		return fmt.Errorf(
+			"raw payload has size %d, want %d or %d without trailing padding",
+			len(payload), s.payloadSize, s.omittedPaddingSize,
+		)
 	}
 	return s.writer.writeData(s.registration, payload)
 }
@@ -523,6 +548,25 @@ func layoutByteSize(layout []layoutField) int {
 	}
 	last := layout[len(layout)-1]
 	return last.offset + last.size
+}
+
+func rawPayloadSizes(root Format, layout []layoutField) (int, int) {
+	fullSize := layoutByteSize(layout)
+	if len(root.Fields) == 0 {
+		return fullSize, fullSize
+	}
+	padding := root.Fields[len(root.Fields)-1]
+	if !strings.HasPrefix(padding.Name, "_padding") {
+		return fullSize, fullSize
+	}
+	for _, field := range layout {
+		if field.name == padding.Name ||
+			strings.HasPrefix(field.name, padding.Name+"[") ||
+			strings.HasPrefix(field.name, padding.Name+".") {
+			return fullSize, field.offset
+		}
+	}
+	return fullSize, fullSize
 }
 
 func encodeTypedValue(schema *typedSchema, value reflect.Value) ([]byte, error) {

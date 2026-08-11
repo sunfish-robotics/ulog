@@ -42,6 +42,7 @@ func TestParseFormatRejectsMalformedDefinitions(t *testing.T) {
 		{name: "array exceeds data message", format: "vehicle_attitude:uint8_t[65534] values;"},
 		{name: "wide array exceeds data message", format: "vehicle_attitude:uint64_t[8192] values;"},
 		{name: "invalid message name", format: "vehicle attitude:uint64_t timestamp;"},
+		{name: "primitive message name", format: "float:uint64_t timestamp;"},
 		{name: "invalid field name", format: "vehicle_attitude:uint64_t time-stamp;"},
 	}
 

@@ -12,6 +12,12 @@ type typedPoint struct {
 	Y float32
 }
 
+type typedPointSample struct {
+	Timestamp uint64
+	X         int16
+	Y         float32
+}
+
 type typedSample struct {
 	Timestamp  uint64
 	HTTPStatus uint16

@@ -72,7 +72,7 @@ The writer also accepts dynamic `Format` values and raw, format-validated payloa
 
 ## Analyse datasets
 
-`Read` eagerly groups records by format name and `multi_id`, preserving primitive widths, null trailing fields, information entries, parameters, logs, and dropouts.
+`Read` eagerly groups records by format name and `multi_id`, preserving primitive widths, null trailing fields, information and multi-information entries, parameter changes and defaults, logs, and dropouts.
 
 ```go
 file, err := ulog.Read(source)
@@ -119,11 +119,11 @@ The pinned environment and fixture provenance live under [`integration/pyulog`](
 
 ## Current scope
 
-- ULog version 1 files
+- ULog version 1 writing and forward-compatible header and flag-bit reading
 - dynamic primitive, fixed-array, and nested-format data
 - streaming and eager reads
 - typed and dynamic writing
-- information, initial parameters, logging, and dropouts
+- information and multi-information, parameters and defaults, logging, and dropouts
 - Arrow record batches and Parquet output
 
 Appended data sections are rejected rather than silently misread. Multi-information, default-parameter, and tagged-log writing are available at the lower-level `pkg/wire` boundary but do not yet have root-package writer conveniences.

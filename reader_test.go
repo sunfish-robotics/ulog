@@ -141,9 +141,11 @@ func TestReaderRejectsUnknownDataMessageID(t *testing.T) {
 
 func TestReaderRejectsPartiallyEncodedFields(t *testing.T) {
 	data := newULogFixture(t, 0)
-	data.message(t, wire.MessageTypeFormat, wire.FormatMessage{Format: "partial:uint32_t value;"})
+	data.message(t, wire.MessageTypeFormat, wire.FormatMessage{Format: "partial:uint64_t timestamp;uint32_t value;"})
 	data.message(t, wire.MessageTypeSubscription, wire.SubscriptionMessage{MessageID: 1, MessageName: "partial"})
-	data.message(t, wire.MessageTypeData, wire.DataMessage{MessageID: 1, Data: []byte{1, 2}})
+	payload := binary.LittleEndian.AppendUint64(nil, 1)
+	payload = append(payload, 1, 2)
+	data.message(t, wire.MessageTypeData, wire.DataMessage{MessageID: 1, Data: payload})
 
 	reader, err := NewReader(bytes.NewReader(data.bytes()))
 	if err != nil {
@@ -160,7 +162,7 @@ func TestReaderRejectsPartiallyEncodedFields(t *testing.T) {
 func TestReaderRejectsNestedLayoutsLargerThanADataMessage(t *testing.T) {
 	data := newULogFixture(t, 0)
 	data.message(t, wire.MessageTypeFormat, wire.FormatMessage{Format: "inner:uint16_t value;"})
-	data.message(t, wire.MessageTypeFormat, wire.FormatMessage{Format: "outer:inner[65533] values;"})
+	data.message(t, wire.MessageTypeFormat, wire.FormatMessage{Format: "outer:uint64_t timestamp;inner[65533] values;"})
 	data.message(t, wire.MessageTypeSubscription, wire.SubscriptionMessage{MessageID: 1, MessageName: "outer"})
 
 	reader, err := NewReader(bytes.NewReader(data.bytes()))
@@ -172,6 +174,44 @@ func TestReaderRejectsNestedLayoutsLargerThanADataMessage(t *testing.T) {
 	}
 	if err := reader.Err(); err == nil || !strings.Contains(err.Error(), "maximum data payload") {
 		t.Fatalf("Err() = %v, want oversized layout error", err)
+	}
+}
+
+func TestReaderRejectsSubscribedFormatWithoutTimestamp(t *testing.T) {
+	data := newULogFixture(t, 0)
+	data.message(t, wire.MessageTypeFormat, wire.FormatMessage{Format: "invalid:uint32_t value;"})
+	data.message(t, wire.MessageTypeSubscription, wire.SubscriptionMessage{MessageID: 1, MessageName: "invalid"})
+
+	reader, err := NewReader(bytes.NewReader(data.bytes()))
+	if err != nil {
+		t.Fatalf("NewReader() error = %v", err)
+	}
+	if reader.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if err := reader.Err(); err == nil || !strings.Contains(err.Error(), "timestamp") {
+		t.Fatalf("Err() = %v, want timestamp error", err)
+	}
+}
+
+func TestReaderAcceptsFutureVersionAndExtendedFlagBits(t *testing.T) {
+	data := newULogFixture(t, 0)
+	data.data[7] = 99
+	binary.LittleEndian.PutUint16(data.data[16:18], 42)
+	data.data = append(data.data, 0xaa, 0xbb)
+
+	reader, err := NewReader(bytes.NewReader(data.bytes()))
+	if err != nil {
+		t.Fatalf("NewReader() error = %v", err)
+	}
+	if got := reader.Header().Version; got != 99 {
+		t.Errorf("Header().Version = %d, want 99", got)
+	}
+	if reader.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if err := reader.Err(); err != nil {
+		t.Fatalf("Err() = %v", err)
 	}
 }
 
