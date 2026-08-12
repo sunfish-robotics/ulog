@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"unicode"
 )
@@ -15,9 +16,10 @@ type typedSchema struct {
 }
 
 type typedLeaf struct {
-	path   string
-	typeID Type
-	steps  []valueStep
+	path        string
+	typeID      Type
+	arrayLength int
+	steps       []valueStep
 }
 
 type valueStep struct {
@@ -80,6 +82,9 @@ func Decode[T any](record Record) (T, error) {
 		}
 		if value.Type != leaf.typeID {
 			return result, fmt.Errorf("record field %q has type %q, but %s requires %q", value.Name, value.Type, schema.root, leaf.typeID)
+		}
+		if value.ArrayLength != leaf.arrayLength {
+			return result, fmt.Errorf("record field %q has array length %d, but %s requires %d", value.Name, value.ArrayLength, schema.root, leaf.arrayLength)
 		}
 		if err := setTypedValue(destination, leaf.steps, value.Value); err != nil {
 			return result, fmt.Errorf("decode field %q: %w", leaf.path, err)
@@ -168,6 +173,7 @@ type reflectedField struct {
 	typeID      Type
 	arrayLength int
 	nested      reflect.Type
+	text        bool
 	skipped     bool
 }
 
@@ -179,11 +185,8 @@ func reflectField(field reflect.StructField) (reflectedField, error) {
 	if field.PkgPath != "" {
 		return reflectedField{}, errors.New("unexported fields must use `ulog:\"-\"`")
 	}
-	if strings.Contains(tag, ",") {
-		return reflectedField{}, fmt.Errorf("unsupported ulog tag %q", tag)
-	}
 
-	name := tag
+	name, option, hasOption := strings.Cut(tag, ",")
 	if name == "" {
 		name = lowerSnake(field.Name)
 	}
@@ -192,6 +195,26 @@ func reflectField(field reflect.StructField) (reflectedField, error) {
 	}
 
 	typ := field.Type
+	if typ.Kind() == reflect.String {
+		if !hasOption {
+			return reflectedField{}, errors.New("string fields require a fixed-width char[N] ulog tag")
+		}
+		matches := typePattern.FindStringSubmatch(option)
+		if matches == nil || matches[1] != string(TypeChar) || matches[2] == "" {
+			return reflectedField{}, fmt.Errorf("unsupported ulog tag option %q", option)
+		}
+		arrayLength, err := strconv.Atoi(matches[2])
+		if err != nil || arrayLength == 0 || arrayLength > maxDataPayloadSize {
+			return reflectedField{}, fmt.Errorf("invalid character array width %q", matches[2])
+		}
+		return reflectedField{
+			name: name, typeID: TypeChar, arrayLength: arrayLength, text: true,
+		}, nil
+	}
+	if hasOption {
+		return reflectedField{}, fmt.Errorf("unsupported ulog tag option %q", option)
+	}
+
 	arrayLength := 0
 	if typ.Kind() == reflect.Array {
 		arrayLength = typ.Len()
@@ -252,6 +275,17 @@ func typedLeaves(typ reflect.Type, prefix string, steps []valueStep) ([]typedLea
 		if field.skipped {
 			continue
 		}
+		if field.text {
+			path := field.name
+			if prefix != "" {
+				path = prefix + "." + path
+			}
+			fieldSteps := append(append([]valueStep(nil), steps...), valueStep{field: i, array: -1})
+			leaves = append(leaves, typedLeaf{
+				path: path, typeID: TypeChar, arrayLength: field.arrayLength, steps: fieldSteps,
+			})
+			continue
+		}
 
 		count := field.arrayLength
 		if count == 0 {
@@ -300,6 +334,8 @@ func setTypedValue(destination reflect.Value, steps []valueStep, value any) erro
 		destination.SetFloat(source.Float())
 	case reflect.Bool:
 		destination.SetBool(source.Bool())
+	case reflect.String:
+		destination.SetString(source.String())
 	default:
 		return fmt.Errorf("unsupported destination type %s", destination.Type())
 	}

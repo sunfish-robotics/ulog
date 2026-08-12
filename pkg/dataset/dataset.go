@@ -144,8 +144,9 @@ func (f *File) Dataset(name string, multiID uint8) (*Dataset, error) {
 	return dataset, nil
 }
 
-// Dataset contains every record for one format name and multi ID. Each flattened
-// scalar field has a [Column]; a record that omits compatible trailing fields
+// Dataset contains every record for one format name and multi ID. Numeric arrays
+// and nested formats are flattened into stable paths; character arrays remain
+// string-valued [Column] values. A record that omits compatible trailing fields
 // contributes nulls to the corresponding columns.
 type Dataset struct {
 	name        string
@@ -165,7 +166,7 @@ func newDataset(record ulog.Record) *Dataset {
 	}
 	for _, field := range record.Fields() {
 		dataset.columnIndex[field.Name] = len(dataset.columns)
-		dataset.columns = append(dataset.columns, newColumn(field.Name, field.Type))
+		dataset.columns = append(dataset.columns, newColumn(field.Name, field.Type, field.ArrayLength))
 	}
 	return dataset
 }
@@ -228,7 +229,7 @@ func (d *Dataset) Len() int {
 	return d.length
 }
 
-// Columns returns the flattened, non-padding scalar columns in wire order.
+// Columns returns the flattened, non-padding columns in wire order.
 // Mutating the returned slice does not change the dataset.
 func (d *Dataset) Columns() []Column {
 	if d == nil {
@@ -250,23 +251,31 @@ func (d *Dataset) Column(name string) (Column, bool) {
 	return d.columns[index], true
 }
 
-// Column is a nullable, primitive-typed dataset column. [Column.Values] returns
-// one of []int8, []uint8, []int16, []uint16, []int32, []uint32, []int64,
-// []uint64, []float32, []float64, or []bool according to [Column.Type].
+// Column is a nullable dataset column. [Column.Values] returns one of []int8,
+// []uint8, []int16, []uint16, []int32, []uint32, []int64, []uint64, []float32,
+// []float64, []bool, or []string. Character arrays use []string; scalar
+// characters use []uint8.
 type Column struct {
-	name   string
-	typeID ulog.Type
-	values any
-	valid  []bool
+	name        string
+	typeID      ulog.Type
+	arrayLength int
+	values      any
+	valid       []bool
 }
 
-func newColumn(name string, typeID ulog.Type) Column {
-	column := Column{name: name, typeID: typeID}
+func newColumn(name string, typeID ulog.Type, arrayLength int) Column {
+	column := Column{name: name, typeID: typeID, arrayLength: arrayLength}
 	switch typeID {
 	case ulog.TypeInt8:
 		column.values = []int8(nil)
-	case ulog.TypeUint8, ulog.TypeChar:
+	case ulog.TypeUint8:
 		column.values = []uint8(nil)
+	case ulog.TypeChar:
+		if arrayLength > 0 {
+			column.values = []string(nil)
+		} else {
+			column.values = []uint8(nil)
+		}
 	case ulog.TypeInt16:
 		column.values = []int16(nil)
 	case ulog.TypeUint16:
@@ -294,7 +303,12 @@ func (c *Column) append(value any, valid bool) error {
 	switch c.typeID {
 	case ulog.TypeInt8:
 		return appendColumnValue(c, value, valid, func(values []int8, value int8) any { return append(values, value) })
-	case ulog.TypeUint8, ulog.TypeChar:
+	case ulog.TypeUint8:
+		return appendColumnValue(c, value, valid, func(values []uint8, value uint8) any { return append(values, value) })
+	case ulog.TypeChar:
+		if c.arrayLength > 0 {
+			return appendColumnValue(c, value, valid, func(values []string, value string) any { return append(values, value) })
+		}
 		return appendColumnValue(c, value, valid, func(values []uint8, value uint8) any { return append(values, value) })
 	case ulog.TypeInt16:
 		return appendColumnValue(c, value, valid, func(values []int16, value int16) any { return append(values, value) })
@@ -342,6 +356,10 @@ func (c Column) Name() string { return c.name }
 // Type returns the ULog primitive type stored by the column.
 func (c Column) Type() ulog.Type { return c.typeID }
 
+// ArrayLength returns the fixed byte width of a character array, or zero for a
+// scalar value.
+func (c Column) ArrayLength() int { return c.arrayLength }
+
 // Len returns the number of rows in the column.
 func (c Column) Len() int { return len(c.valid) }
 
@@ -371,6 +389,8 @@ func (c Column) Values() any {
 		return append([]float64(nil), values...)
 	case []bool:
 		return append([]bool(nil), values...)
+	case []string:
+		return append([]string(nil), values...)
 	default:
 		return nil
 	}
@@ -404,6 +424,8 @@ func (c Column) Value(index int) (any, bool) {
 	case []float64:
 		return values[index], true
 	case []bool:
+		return values[index], true
+	case []string:
 		return values[index], true
 	default:
 		return nil, false

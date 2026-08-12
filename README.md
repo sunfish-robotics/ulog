@@ -20,7 +20,7 @@ The [package documentation][go-reference] contains executable examples for the c
 - load a file into column-oriented datasets and export individual datasets as CSV with [`pkg/dataset`][dataset-reference]; and
 - convert datasets to Apache Arrow or Parquet with [`pkg/columnar`][columnar-reference].
 
-ULog `F` format messages remain authoritative. `FormatFor[T]`, `Decode[T]`, and `Register[T]` provide optional typed adapters without requiring a matching Go struct to read a file. Arrays and nested formats use flattened paths such as `q[0]` and `position.x`.
+ULog `F` format messages remain authoritative. `FormatFor[T]`, `Decode[T]`, and `Register[T]` provide optional typed adapters without requiring a matching Go struct to read a file. Numeric arrays and nested formats use flattened paths such as `q[0]` and `position.x`. Character arrays remain one string-valued field; scalar `char` and `uint8_t` arrays remain byte-valued. Typed string fields declare their wire width explicitly with a tag such as `ulog:"name,char[80]"`.
 
 The root `ulog` and `pkg/dataset` packages use only the Go standard library. Importing `pkg/columnar` adds Apache Arrow.
 

@@ -1,6 +1,7 @@
 // Package columnar converts [dataset.Dataset] values to Apache Arrow and
-// Parquet. Flattened ULog field paths become nullable column names, and the ULog
-// format name, definition, and multi ID are preserved as Arrow schema metadata.
+// Parquet. Flattened ULog field paths become nullable column names, character
+// arrays become UTF-8 strings, and the ULog format name, definition, and multi ID
+// are preserved as Arrow schema metadata.
 package columnar
 
 import (
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"unicode/utf8"
 
 	arrowlib "github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
@@ -33,7 +35,7 @@ func ToArrow(source *dataset.Dataset, allocator memory.Allocator) (arrowlib.Reco
 	columns := source.Columns()
 	fields := make([]arrowlib.Field, len(columns))
 	for i, column := range columns {
-		dataType, err := arrowType(column.Type())
+		dataType, err := arrowType(column.Type(), column.ArrayLength())
 		if err != nil {
 			return nil, fmt.Errorf("column %q: %w", column.Name(), err)
 		}
@@ -89,11 +91,16 @@ func WriteParquet(destination io.Writer, source *dataset.Dataset) error {
 	return nil
 }
 
-func arrowType(typeID ulog.Type) (arrowlib.DataType, error) {
+func arrowType(typeID ulog.Type, arrayLength int) (arrowlib.DataType, error) {
 	switch typeID {
 	case ulog.TypeInt8:
 		return arrowlib.PrimitiveTypes.Int8, nil
-	case ulog.TypeUint8, ulog.TypeChar:
+	case ulog.TypeUint8:
+		return arrowlib.PrimitiveTypes.Uint8, nil
+	case ulog.TypeChar:
+		if arrayLength > 0 {
+			return arrowlib.BinaryTypes.String, nil
+		}
 		return arrowlib.PrimitiveTypes.Uint8, nil
 	case ulog.TypeInt16:
 		return arrowlib.PrimitiveTypes.Int16, nil
@@ -126,12 +133,32 @@ func appendColumn(builder array.Builder, column dataset.Column, valid []bool) er
 			return builderTypeError(column, builder)
 		}
 		builder.AppendValues(column.Values().([]int8), valid)
-	case ulog.TypeUint8, ulog.TypeChar:
+	case ulog.TypeUint8:
 		builder, ok := builder.(*array.Uint8Builder)
 		if !ok {
 			return builderTypeError(column, builder)
 		}
 		builder.AppendValues(column.Values().([]uint8), valid)
+	case ulog.TypeChar:
+		if column.ArrayLength() == 0 {
+			builder, ok := builder.(*array.Uint8Builder)
+			if !ok {
+				return builderTypeError(column, builder)
+			}
+			builder.AppendValues(column.Values().([]uint8), valid)
+			break
+		}
+		builder, ok := builder.(*array.StringBuilder)
+		if !ok {
+			return builderTypeError(column, builder)
+		}
+		values := column.Values().([]string)
+		for row, value := range values {
+			if valid[row] && !utf8.ValidString(value) {
+				return fmt.Errorf("column %q row %d is not valid UTF-8", column.Name(), row)
+			}
+		}
+		builder.AppendValues(values, valid)
 	case ulog.TypeInt16:
 		builder, ok := builder.(*array.Int16Builder)
 		if !ok {

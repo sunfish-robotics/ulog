@@ -49,11 +49,12 @@ type subscription struct {
 }
 
 type layoutField struct {
-	name   string
-	typeID Type
-	offset int
-	size   int
-	hidden bool
+	name        string
+	typeID      Type
+	arrayLength int
+	offset      int
+	size        int
+	hidden      bool
 }
 
 // NewReader consumes the fixed file header from source and checks its magic
@@ -406,6 +407,26 @@ func resolveFormatLayout(
 	start := offset
 	var layout []layoutField
 	for _, field := range format.Fields {
+		fieldHidden := hidden || strings.HasPrefix(field.Name, "_padding")
+		if field.Type == TypeChar && field.ArrayLength > 0 {
+			path := field.Name
+			if prefix != "" {
+				path = prefix + "." + path
+			}
+			if offset > maxDataPayloadSize-field.ArrayLength {
+				return nil, 0, fmt.Errorf("format %q exceeds maximum data payload of %d bytes", name, maxDataPayloadSize)
+			}
+			layout = append(layout, layoutField{
+				name:        path,
+				typeID:      field.Type,
+				arrayLength: field.ArrayLength,
+				offset:      offset,
+				size:        field.ArrayLength,
+				hidden:      fieldHidden,
+			})
+			offset += field.ArrayLength
+			continue
+		}
 		count := field.ArrayLength
 		if count == 0 {
 			count = 1
@@ -419,8 +440,6 @@ func resolveFormatLayout(
 			if prefix != "" {
 				path = prefix + "." + fieldName
 			}
-			fieldHidden := hidden || strings.HasPrefix(field.Name, "_padding")
-
 			if size, primitive := primitiveSize(field.Type); primitive {
 				if offset > maxDataPayloadSize-size {
 					return nil, 0, fmt.Errorf("format %q exceeds maximum data payload of %d bytes", name, maxDataPayloadSize)
@@ -452,24 +471,31 @@ func cloneFormat(format Format) Format {
 	return format
 }
 
-// FieldValue is one dynamically decoded scalar from a [Record]. [FieldValue.Name]
-// is flattened: arrays and nested formats use paths such as "q[0]" and
-// "position.x".
+// FieldValue is one dynamically decoded value from a [Record]. [FieldValue.Name]
+// is flattened: numeric arrays and nested formats use paths such as "q[0]" and
+// "position.x". Character arrays remain one string-valued field.
 type FieldValue struct {
 	// Name is the flattened field path.
 	Name string
 	// Type is the primitive wire type of Value.
 	Type Type
-	// Value has the Go scalar type corresponding to Type.
+	// ArrayLength is the fixed byte width of a character array, or zero for a
+	// scalar value.
+	ArrayLength int
+	// Value has the Go scalar type corresponding to Type. Character arrays are
+	// strings with trailing NUL padding removed.
 	Value any
 }
 
-// ScalarField describes one flattened, non-padding scalar in a [Record].
+// ScalarField describes one flattened, non-padding value in a [Record].
 type ScalarField struct {
 	// Name is the flattened field path.
 	Name string
 	// Type is the field's primitive wire type.
 	Type Type
+	// ArrayLength is the fixed byte width of a character array, or zero for a
+	// scalar value.
+	ArrayLength int
 }
 
 // Record is one ULog data message paired with the subscription and [Format]
@@ -498,7 +524,7 @@ func (r Record) MultiID() uint8 { return r.multiID }
 // record's subscription.
 func (r Record) Format() Format { return cloneFormat(r.format) }
 
-// Fields returns every flattened, non-padding scalar field in the selected
+// Fields returns every flattened, non-padding value in the selected
 // format, in wire order. A compatible older record may omit trailing fields;
 // [Record.Value] reports those fields as unavailable.
 func (r Record) Fields() []ScalarField {
@@ -507,7 +533,7 @@ func (r Record) Fields() []ScalarField {
 		if field.hidden {
 			continue
 		}
-		fields = append(fields, ScalarField{Name: field.name, Type: field.typeID})
+		fields = append(fields, ScalarField{Name: field.name, Type: field.typeID, ArrayLength: field.arrayLength})
 	}
 	return fields
 }
@@ -517,7 +543,7 @@ func (r Record) Fields() []ScalarField {
 // The payload may omit trailing top-level padding permitted by ULog.
 func (r Record) Bytes() []byte { return bytes.Clone(r.data) }
 
-// Values decodes every available non-padding scalar field in wire order.
+// Values decodes every available non-padding value in wire order.
 // Missing trailing fields are omitted to support compatible schema extension.
 func (r Record) Values() ([]FieldValue, error) {
 	values := make([]FieldValue, 0, len(r.layout))
@@ -533,16 +559,18 @@ func (r Record) Values() ([]FieldValue, error) {
 			continue
 		}
 
-		value, err := decodePrimitive(field.typeID, r.data[field.offset:end])
+		value, err := decodeLayoutValue(field, r.data[field.offset:end])
 		if err != nil {
 			return nil, fmt.Errorf("decode field %q: %w", field.name, err)
 		}
-		values = append(values, FieldValue{Name: field.name, Type: field.typeID, Value: value})
+		values = append(values, FieldValue{
+			Name: field.name, Type: field.typeID, ArrayLength: field.arrayLength, Value: value,
+		})
 	}
 	return values, nil
 }
 
-// Value decodes a scalar field by its flattened path. It reports an error when
+// Value decodes a field by its flattened path. It reports an error when
 // the field is unknown, omitted as trailing data, or truncated.
 func (r Record) Value(name string) (any, error) {
 	values, err := r.Values()
@@ -555,6 +583,13 @@ func (r Record) Value(name string) (any, error) {
 		}
 	}
 	return nil, fmt.Errorf("field %q is not available in record %q", name, r.Name())
+}
+
+func decodeLayoutValue(field layoutField, data []byte) (any, error) {
+	if field.typeID == TypeChar && field.arrayLength > 0 {
+		return string(bytes.TrimRight(data, "\x00")), nil
+	}
+	return decodePrimitive(field.typeID, data)
 }
 
 func decodePrimitive(typeID Type, data []byte) (any, error) {
