@@ -10,103 +10,19 @@ A pure-Go reader, writer, and analysis library for [the PX4 ULog format][referen
 go get github.com/sunfish-robotics/ulog
 ```
 
-## Read a stream
+## Usage
 
-`Reader` keeps bounded state and returns one dynamically typed data record at a time. ULog `F` format messages remain authoritative, so files do not need matching Go structs.
+The [package documentation][go-reference] contains executable examples for the common workflows:
 
-```go
-source, err := os.Open("flight.ulg")
-if err != nil {
-    return err
-}
-defer source.Close()
+- stream dynamically typed records with bounded memory;
+- decode selected formats into typed Go structs;
+- write records from typed Go structs;
+- load a file into column-oriented datasets for analysis; and
+- convert datasets to Apache Arrow or Parquet with [`pkg/columnar`][columnar-reference].
 
-reader, err := ulog.NewReader(source)
-if err != nil {
-    return err
-}
-for reader.Next() {
-    record := reader.Record()
-    timestamp, err := record.Value("timestamp")
-    if err != nil {
-        return err
-    }
-    fmt.Printf("%s[%d] timestamp=%v\n", record.Name(), record.MultiID(), timestamp)
-}
-if err := reader.Err(); err != nil {
-    return err
-}
-```
+ULog `F` format messages remain authoritative. `FormatFor[T]`, `Decode[T]`, and `Register[T]` provide optional typed adapters without requiring a matching Go struct to read a file. Arrays and nested formats use flattened paths such as `q[0]` and `position.x`.
 
-Arrays and nested formats use flattened paths such as `q[0]` and `position.x`.
-
-## Use typed Go values
-
-`FormatFor[T]`, `Decode[T]`, and `Register[T]` adapt Go structs to the dynamic schema model. They do not replace the schema carried by a ULog file.
-
-```go
-type Sample struct {
-    Timestamp uint64
-    Pressure  float32
-    Valid     bool
-}
-
-var output bytes.Buffer
-writer, err := ulog.NewWriter(&output, ulog.WithStartTimestamp(1_000_000))
-if err != nil {
-    return err
-}
-stream, err := ulog.Register[Sample](writer)
-if err != nil {
-    return err
-}
-if err := stream.Write(Sample{Timestamp: 1_000_100, Pressure: 101.25, Valid: true}); err != nil {
-    return err
-}
-if err := writer.Close(); err != nil {
-    return err
-}
-```
-
-The writer also accepts dynamic `Format` values and raw, format-validated payloads through `RegisterFormat`.
-
-## Analyse datasets
-
-`Read` eagerly groups records by format name and `multi_id`, preserving primitive widths, null trailing fields, information and multi-information entries, parameter changes and defaults, logs, and dropouts.
-
-```go
-file, err := ulog.Read(source)
-if err != nil {
-    return err
-}
-dataset, err := file.Dataset("vehicle_attitude", 0)
-if err != nil {
-    return err
-}
-timestamps, ok := dataset.Column("timestamp")
-if !ok {
-    return errors.New("timestamp column is missing")
-}
-values := timestamps.Values().([]uint64)
-```
-
-For Arrow and Parquet, import the separate adapter package:
-
-```go
-import "github.com/sunfish-robotics/ulog/pkg/columnar"
-
-record, err := columnar.ToArrow(dataset, nil)
-if err != nil {
-    return err
-}
-defer record.Release()
-
-if err := columnar.WriteParquet(destination, dataset); err != nil {
-    return err
-}
-```
-
-The root `ulog` package uses only the Go standard library. Importing `columnar` adds Apache Arrow.
+The root `ulog` package uses only the Go standard library. Importing `pkg/columnar` adds Apache Arrow.
 
 ## Compatibility
 
@@ -137,6 +53,7 @@ This project is released under the [Apache License, Version 2.0](LICENSE).
 [ci]: https://github.com/sunfish-robotics/ulog/actions/workflows/ci.yml
 [ci-badge]: https://github.com/sunfish-robotics/ulog/actions/workflows/ci.yml/badge.svg
 [go-reference]: https://pkg.go.dev/github.com/sunfish-robotics/ulog
+[columnar-reference]: https://pkg.go.dev/github.com/sunfish-robotics/ulog/pkg/columnar
 [license]: LICENSE
 [license-badge]: https://img.shields.io/badge/license-Apache--2.0-blue.svg
 [reference]: https://docs.px4.io/main/en/dev_log/ulog_file_format
