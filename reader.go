@@ -23,26 +23,22 @@ type Header struct {
 }
 
 // Reader streams format-resolved [Record] values from ULog. As [Reader.Next]
-// advances, it also collects information, parameters, logs, and dropouts.
+// advances, it also collects information, multi-information groups, parameters,
+// logs, and dropouts.
 type Reader struct {
 	source        io.Reader
 	header        Header
 	formats       map[string]Format
 	subscriptions map[uint16]subscription
 	information   []KeyValue
+	multiInfo     []MultiInformationGroup
+	multiInfoLast map[string]int
 	parameters    []KeyValue
 	defaults      []DefaultParameter
-	multiInfo     *pendingMultiInformation
 	logs          []LogEntry
 	dropouts      []Dropout
 	record        Record
 	err           error
-}
-
-type pendingMultiInformation struct {
-	key      string
-	value    []byte
-	expected int
 }
 
 type subscription struct {
@@ -88,6 +84,7 @@ func NewReader(source io.Reader) (*Reader, error) {
 		},
 		formats:       make(map[string]Format),
 		subscriptions: make(map[uint16]subscription),
+		multiInfoLast: make(map[string]int),
 	}, nil
 }
 
@@ -110,9 +107,6 @@ func (r *Reader) Next() bool {
 	for {
 		messageType, payload, err := readMessage(r.source)
 		if errors.Is(err, io.EOF) {
-			if err := r.flushMultiInformation(); err != nil {
-				r.err = err
-			}
 			return false
 		}
 		if err != nil {
@@ -154,6 +148,16 @@ func (r *Reader) Information() []KeyValue {
 		return nil
 	}
 	return cloneKeyValues(r.information)
+}
+
+// MultiInformation returns independent copies of the grouped multi-information
+// values encountered so far, in the order each group started. Every value keeps
+// the type and array length declared by its own wire message.
+func (r *Reader) MultiInformation() []MultiInformationGroup {
+	if r == nil {
+		return nil
+	}
+	return cloneMultiInformation(r.multiInfo)
 }
 
 // Parameters returns independent copies of the initial parameter values and
@@ -211,11 +215,6 @@ func readMessage(source io.Reader) (wire.MessageType, []byte, error) {
 }
 
 func (r *Reader) consume(messageType wire.MessageType, payload []byte) (Record, bool, error) {
-	if messageType != wire.MessageTypeMultiInformation {
-		if err := r.flushMultiInformation(); err != nil {
-			return Record{}, false, err
-		}
-	}
 	switch messageType {
 	case wire.MessageTypeFlagBits:
 		flagSize := binary.Size(wire.FlagBitsMessage{})
@@ -261,32 +260,22 @@ func (r *Reader) consume(messageType wire.MessageType, payload []byte) (Record, 
 		if err := message.UnmarshalBinary(payload); err != nil {
 			return Record{}, false, fmt.Errorf("decode multi-information message: %w", err)
 		}
-		if message.IsContinued > 1 {
-			return Record{}, false, fmt.Errorf("multi-information continuation flag is %d, want 0 or 1", message.IsContinued)
+		entry, err := decodeMultiInformationValue(message.Key, message.Value)
+		if err != nil {
+			return Record{}, false, fmt.Errorf("decode multi-information value: %w", err)
 		}
 		if message.IsContinued == 0 {
-			if err := r.flushMultiInformation(); err != nil {
-				return Record{}, false, err
-			}
-			_, expected, err := keyValueField(message.Key)
-			if err != nil {
-				return Record{}, false, fmt.Errorf("decode multi-information key: %w", err)
-			}
-			if len(message.Value) > expected {
-				return Record{}, false, fmt.Errorf("multi-information value for %q exceeds declared size %d", message.Key, expected)
-			}
-			r.multiInfo = &pendingMultiInformation{
-				key: message.Key, value: bytes.Clone(message.Value), expected: expected,
-			}
+			r.multiInfo = append(r.multiInfo, MultiInformationGroup{
+				Name: entry.Name, Values: []MultiInformationValue{entry},
+			})
+			r.multiInfoLast[entry.Name] = len(r.multiInfo) - 1
 			break
 		}
-		if r.multiInfo == nil || r.multiInfo.key != message.Key {
-			return Record{}, false, fmt.Errorf("multi-information continuation for %q has no matching previous message", message.Key)
+		index, ok := r.multiInfoLast[entry.Name]
+		if !ok {
+			return Record{}, false, fmt.Errorf("multi-information continuation for %q has no matching previous message", entry.Name)
 		}
-		if len(r.multiInfo.value) > r.multiInfo.expected-len(message.Value) {
-			return Record{}, false, fmt.Errorf("multi-information value for %q exceeds declared size %d", message.Key, r.multiInfo.expected)
-		}
-		r.multiInfo.value = append(r.multiInfo.value, message.Value...)
+		r.multiInfo[index].Values = append(r.multiInfo[index].Values, entry)
 	case wire.MessageTypeParameter:
 		var message wire.ParameterMessage
 		if err := message.UnmarshalBinary(payload); err != nil {
@@ -389,19 +378,6 @@ func (r *Reader) consume(messageType wire.MessageType, payload []byte) (Record, 
 	}
 
 	return Record{}, false, nil
-}
-
-func (r *Reader) flushMultiInformation() error {
-	if r.multiInfo == nil {
-		return nil
-	}
-	entry, err := decodeKeyValue(r.multiInfo.key, r.multiInfo.value)
-	if err != nil {
-		return fmt.Errorf("decode multi-information value: %w", err)
-	}
-	r.information = append(r.information, entry)
-	r.multiInfo = nil
-	return nil
 }
 
 func resolveLayout(root Format, formats map[string]Format) ([]layoutField, error) {

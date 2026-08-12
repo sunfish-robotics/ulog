@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"reflect"
+	"strings"
 	"time"
 )
 
@@ -20,6 +21,26 @@ type KeyValue struct {
 	ArrayLength int
 	// Value is a Go scalar, primitive slice, or string matching Type and ArrayLength.
 	Value any
+}
+
+// MultiInformationValue is one independently typed value from a
+// [MultiInformationGroup]. IsArray distinguishes scalar values from arrays,
+// including PX4's empty char[0] separator values.
+type MultiInformationValue struct {
+	KeyValue
+	// IsArray reports whether the wire declaration included an array length.
+	IsArray bool
+}
+
+// MultiInformationGroup contains one ordered group of multi-information values
+// with the same name. The first value starts the group; subsequent values were
+// marked as continuations on the wire. Each value retains its own declared type
+// and array length.
+type MultiInformationGroup struct {
+	// Name is the case-sensitive information key shared by Values.
+	Name string
+	// Values contains the independently typed entries in wire order.
+	Values []MultiInformationValue
 }
 
 // DefaultParameterTypes identifies the independent configuration scopes to
@@ -135,6 +156,29 @@ func decodeKeyValue(key string, data []byte) (KeyValue, error) {
 	return entry, err
 }
 
+func decodeMultiInformationValue(key string, data []byte) (MultiInformationValue, error) {
+	const emptyCharacterArray = "char[0] "
+	if strings.HasPrefix(key, emptyCharacterArray) && len(data) == 0 {
+		name := strings.TrimPrefix(key, emptyCharacterArray)
+		if !formatNamePattern.MatchString(name) {
+			return MultiInformationValue{}, fmt.Errorf("invalid key name %q", name)
+		}
+		return MultiInformationValue{
+			KeyValue: KeyValue{Name: name, Type: TypeChar, Value: ""},
+			IsArray:  true,
+		}, nil
+	}
+	entry, err := decodeKeyValue(key, data)
+	if err != nil {
+		return MultiInformationValue{}, err
+	}
+	typeDeclaration, _, _ := strings.Cut(key, " ")
+	return MultiInformationValue{
+		KeyValue: entry,
+		IsArray:  strings.Contains(typeDeclaration, "["),
+	}, nil
+}
+
 func typedPrimitiveSlice(typeID Type, values []any) (any, error) {
 	switch typeID {
 	case TypeInt8:
@@ -207,6 +251,18 @@ func cloneKeyValues(values []KeyValue) []KeyValue {
 	for i, value := range values {
 		cloned[i] = value
 		cloned[i].Value = clonePrimitiveSlice(value.Value)
+	}
+	return cloned
+}
+
+func cloneMultiInformation(groups []MultiInformationGroup) []MultiInformationGroup {
+	cloned := make([]MultiInformationGroup, len(groups))
+	for i, group := range groups {
+		cloned[i] = group
+		cloned[i].Values = append([]MultiInformationValue(nil), group.Values...)
+		for j := range cloned[i].Values {
+			cloned[i].Values[j].Value = clonePrimitiveSlice(cloned[i].Values[j].Value)
+		}
 	}
 	return cloned
 }

@@ -115,16 +115,16 @@ func (m *InformationMessage) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-// MultiInformationMessage carries metadata split across several messages, or
-// repeated values for the same key. Consumers retain these messages in file
-// order. Its message type is [MessageTypeMultiInformation].
+// MultiInformationMessage carries one independently typed metadata value that
+// belongs to an ordered group for its key name. Consumers retain these messages
+// in file order. Its message type is [MessageTypeMultiInformation].
 type MultiInformationMessage struct {
-	// IsContinued is 1 when Value continues the previous message with the same Key,
-	// and 0 when it starts a new value.
+	// IsContinued is 1 when Value belongs to the previous group with the same key
+	// name, and 0 when it starts a new group.
 	IsContinued uint8
-	// Key declares the complete value's type and key name.
+	// Key declares this value's type and key name.
 	Key string
-	// Value contains this part of the key's encoded value bytes.
+	// Value contains this message's complete encoded value bytes.
 	Value []byte
 }
 

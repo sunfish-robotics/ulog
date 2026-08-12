@@ -220,6 +220,36 @@ func TestFileReturnsIndependentMetadataValues(t *testing.T) {
 	}
 }
 
+func TestFilePreservesIndependentMultiInformationGroups(t *testing.T) {
+	fixture := newFixture(t, 0)
+	fixture.message(t, wire.MessageTypeMultiInformation, wire.MultiInformationMessage{
+		Key: "char[7] vehicle-id", Value: []byte("sunfish"),
+	})
+	fixture.message(t, wire.MessageTypeMultiInformation, wire.MultiInformationMessage{
+		IsContinued: 1, Key: "char[3] vehicle-id", Value: []byte("-01"),
+	})
+
+	file, err := dataset.Read(bytes.NewReader(fixture.bytes()))
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	want := []ulog.MultiInformationGroup{{
+		Name: "vehicle-id",
+		Values: []ulog.MultiInformationValue{
+			{KeyValue: ulog.KeyValue{Name: "vehicle-id", Type: ulog.TypeChar, ArrayLength: 7, Value: "sunfish"}, IsArray: true},
+			{KeyValue: ulog.KeyValue{Name: "vehicle-id", Type: ulog.TypeChar, ArrayLength: 3, Value: "-01"}, IsArray: true},
+		},
+	}}
+	got := file.MultiInformation()
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("MultiInformation() = %#v, want %#v", got, want)
+	}
+	got[0].Values[0].Name = "changed"
+	if next := file.MultiInformation(); !reflect.DeepEqual(next, want) {
+		t.Errorf("MultiInformation() after caller mutation = %#v, want %#v", next, want)
+	}
+}
+
 type fixture struct {
 	data []byte
 }

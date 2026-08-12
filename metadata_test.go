@@ -32,13 +32,25 @@ func TestWriterRejectsInitialMetadataAfterDataStarts(t *testing.T) {
 	}
 }
 
-func TestReaderPreservesMultiInformationAndDefaultParameters(t *testing.T) {
+func TestReaderPreservesMultiInformationGroupsAndDefaultParameters(t *testing.T) {
 	data := newULogFixture(t, 0)
 	data.message(t, wire.MessageTypeMultiInformation, wire.MultiInformationMessage{
-		Key: "char[10] vehicle-id", Value: []byte("sunfish"),
+		Key: "char[7] vehicle-id", Value: []byte("sunfish"),
 	})
 	data.message(t, wire.MessageTypeMultiInformation, wire.MultiInformationMessage{
-		IsContinued: 1, Key: "char[10] vehicle-id", Value: []byte("-01"),
+		IsContinued: 1, Key: "char[3] vehicle-id", Value: []byte("-01"),
+	})
+	data.message(t, wire.MessageTypeMultiInformation, wire.MultiInformationMessage{
+		IsContinued: 1, Key: "char[0] vehicle-id",
+	})
+	data.message(t, wire.MessageTypeMultiInformation, wire.MultiInformationMessage{
+		Key: "char[4] vehicle-id", Value: []byte("zoda"),
+	})
+	data.message(t, wire.MessageTypeMultiInformation, wire.MultiInformationMessage{
+		Key: "uint8_t[3] metadata_events", Value: []byte{1, 2, 3},
+	})
+	data.message(t, wire.MessageTypeMultiInformation, wire.MultiInformationMessage{
+		Key: "uint32_t reboot_count", Value: binary.LittleEndian.AppendUint32(nil, 2),
 	})
 	defaultValue := binary.LittleEndian.AppendUint32(nil, math.Float32bits(1.25))
 	data.message(t, wire.MessageTypeDefaultParameter, wire.DefaultParameterMessage{
@@ -57,9 +69,38 @@ func TestReaderPreservesMultiInformationAndDefaultParameters(t *testing.T) {
 	if err := reader.Err(); err != nil {
 		t.Fatalf("Err() = %v", err)
 	}
-	wantInformation := []KeyValue{{Name: "vehicle-id", Type: TypeChar, ArrayLength: 10, Value: "sunfish-01"}}
-	if got := reader.Information(); !reflect.DeepEqual(got, wantInformation) {
-		t.Errorf("Information() = %#v, want %#v", got, wantInformation)
+	if got := reader.Information(); len(got) != 0 {
+		t.Errorf("Information() = %#v, want no entries", got)
+	}
+	wantMultiInformation := []MultiInformationGroup{
+		{
+			Name: "vehicle-id",
+			Values: []MultiInformationValue{
+				{KeyValue: KeyValue{Name: "vehicle-id", Type: TypeChar, ArrayLength: 7, Value: "sunfish"}, IsArray: true},
+				{KeyValue: KeyValue{Name: "vehicle-id", Type: TypeChar, ArrayLength: 3, Value: "-01"}, IsArray: true},
+				{KeyValue: KeyValue{Name: "vehicle-id", Type: TypeChar, Value: ""}, IsArray: true},
+			},
+		},
+		{
+			Name:   "vehicle-id",
+			Values: []MultiInformationValue{{KeyValue: KeyValue{Name: "vehicle-id", Type: TypeChar, ArrayLength: 4, Value: "zoda"}, IsArray: true}},
+		},
+		{
+			Name:   "metadata_events",
+			Values: []MultiInformationValue{{KeyValue: KeyValue{Name: "metadata_events", Type: TypeUint8, ArrayLength: 3, Value: []uint8{1, 2, 3}}, IsArray: true}},
+		},
+		{
+			Name:   "reboot_count",
+			Values: []MultiInformationValue{{KeyValue: KeyValue{Name: "reboot_count", Type: TypeUint32, Value: uint32(2)}}},
+		},
+	}
+	gotMultiInformation := reader.MultiInformation()
+	if !reflect.DeepEqual(gotMultiInformation, wantMultiInformation) {
+		t.Fatalf("MultiInformation() = %#v, want %#v", gotMultiInformation, wantMultiInformation)
+	}
+	gotMultiInformation[2].Values[0].Value.([]uint8)[0] = 99
+	if next := reader.MultiInformation(); !reflect.DeepEqual(next, wantMultiInformation) {
+		t.Errorf("MultiInformation() after caller mutation = %#v, want %#v", next, wantMultiInformation)
 	}
 	wantDefaults := []DefaultParameter{{
 		Types:    DefaultParameterSystemWide | DefaultParameterCurrentConfiguration,
@@ -94,6 +135,24 @@ func TestReaderRejectsMalformedMultiInformationAndDefaultParameters(t *testing.T
 				t.Fatal("Err() = nil, want malformed payload error")
 			}
 		})
+	}
+}
+
+func TestReaderRejectsMultiInformationContinuationWithoutGroup(t *testing.T) {
+	data := newULogFixture(t, 0)
+	data.message(t, wire.MessageTypeMultiInformation, wire.MultiInformationMessage{
+		IsContinued: 1, Key: "char[4] vehicle-id", Value: []byte("zoda"),
+	})
+
+	reader, err := NewReader(bytes.NewReader(data.bytes()))
+	if err != nil {
+		t.Fatalf("NewReader() error = %v", err)
+	}
+	if reader.Next() {
+		t.Fatal("Next() = true, want false")
+	}
+	if err := reader.Err(); err == nil {
+		t.Fatal("Err() = nil, want unmatched continuation error")
 	}
 }
 
