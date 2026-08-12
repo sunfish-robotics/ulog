@@ -1,4 +1,6 @@
-// Package columnar converts ULog datasets to Apache Arrow and Parquet.
+// Package columnar converts [dataset.Dataset] values to Apache Arrow and
+// Parquet. Flattened ULog field paths become nullable column names, and the ULog
+// format name, definition, and multi ID are preserved as Arrow schema metadata.
 package columnar
 
 import (
@@ -17,8 +19,9 @@ import (
 	"github.com/sunfish-robotics/ulog/pkg/dataset"
 )
 
-// ToArrow converts dataset into one Arrow record batch. The caller must release
-// the returned record. A nil allocator uses [memory.DefaultAllocator].
+// ToArrow converts source into one Arrow record batch. The caller owns the
+// returned batch and must call its Release method. A nil allocator uses
+// [memory.DefaultAllocator].
 func ToArrow(source *dataset.Dataset, allocator memory.Allocator) (arrowlib.RecordBatch, error) {
 	if source == nil {
 		return nil, errors.New("nil ULog dataset")
@@ -56,8 +59,8 @@ func ToArrow(source *dataset.Dataset, allocator memory.Allocator) (arrowlib.Reco
 	return builder.NewRecordBatch(), nil
 }
 
-// WriteParquet converts dataset to Arrow and writes a Parquet file to
-// destination. It does not close destination.
+// WriteParquet writes source as one Parquet table using the same schema mapping
+// as [ToArrow]. It does not close destination.
 func WriteParquet(destination io.Writer, source *dataset.Dataset) error {
 	if destination == nil {
 		return errors.New("nil Parquet destination")

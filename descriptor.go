@@ -32,8 +32,9 @@ type schemaBuilder struct {
 	ordered  []Format
 }
 
-// FormatsFor derives the ULog format graph for T. Nested definitions precede
-// the root definition in the returned slice. T must be a named struct type.
+// FormatsFor derives every ULog [Format] needed to encode T. T must be a named
+// struct; nested definitions precede the root definition in the returned slice.
+// See the package documentation for the field and struct-tag mapping.
 func FormatsFor[T any]() ([]Format, error) {
 	schema, err := typedSchemaFor(reflect.TypeFor[T]())
 	if err != nil {
@@ -42,8 +43,8 @@ func FormatsFor[T any]() ([]Format, error) {
 	return cloneFormats(schema.formats), nil
 }
 
-// FormatFor derives the root ULog format for T. Use [FormatsFor] when nested
-// format definitions are also required.
+// FormatFor derives the root ULog [Format] for T. Use [FormatsFor] when nested
+// definitions must also be written.
 func FormatFor[T any]() (*Format, error) {
 	formats, err := FormatsFor[T]()
 	if err != nil {
@@ -53,8 +54,10 @@ func FormatFor[T any]() (*Format, error) {
 	return &root, nil
 }
 
-// Decode decodes record into T after checking flattened field names, order, and
-// primitive wire types. Additional trailing record fields are ignored.
+// Decode maps the leading fields of record into T. It requires the flattened
+// field names, order, and primitive wire types derived by [FormatsFor], but does
+// not require [Record.Name] to match T. Additional trailing record fields are
+// ignored so that T can decode compatible schema extensions.
 func Decode[T any](record Record) (T, error) {
 	var result T
 	schema, err := typedSchemaFor(reflect.TypeFor[T]())

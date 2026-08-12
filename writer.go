@@ -15,14 +15,15 @@ import (
 	"github.com/sunfish-robotics/ulog/pkg/wire"
 )
 
-// WriterOption configures a [Writer].
+// WriterOption configures [NewWriter].
 type WriterOption func(*writerConfig) error
 
 type writerConfig struct {
 	startTimestamp uint64
 }
 
-// WithStartTimestamp sets the file header timestamp in microseconds.
+// WithStartTimestamp records when logging started, in microseconds, in the file
+// header. Without this option [NewWriter] writes zero.
 func WithStartTimestamp(timestamp uint64) WriterOption {
 	return func(config *writerConfig) error {
 		config.startTimestamp = timestamp
@@ -30,7 +31,7 @@ func WithStartTimestamp(timestamp uint64) WriterOption {
 	}
 }
 
-// StreamOption configures a typed or dynamic data stream.
+// StreamOption configures [Register] or [Writer.RegisterFormat].
 type StreamOption func(*streamConfig) error
 
 type streamConfig struct {
@@ -38,7 +39,8 @@ type streamConfig struct {
 	formatName string
 }
 
-// WithMultiID sets the instance identifier for a stream.
+// WithMultiID identifies one of several streams using the same format. Zero is
+// the first and default instance.
 func WithMultiID(multiID uint8) StreamOption {
 	return func(config *streamConfig) error {
 		config.multiID = multiID
@@ -46,7 +48,9 @@ func WithMultiID(multiID uint8) StreamOption {
 	}
 }
 
-// WithFormatName replaces a reflection-derived root format name.
+// WithFormatName sets the root format name used by [Register] or
+// [Writer.RegisterFormat]. For typed streams it replaces the name derived from
+// the Go type; nested format names are unchanged.
 func WithFormatName(name string) StreamOption {
 	return func(config *streamConfig) error {
 		if !formatNamePattern.MatchString(name) {
@@ -57,8 +61,10 @@ func WithFormatName(name string) StreamOption {
 	}
 }
 
-// Writer serialises a ULog stream. Registration must finish before the first
-// data write. Writer methods are safe for concurrent use.
+// Writer serialises a ULog stream. All definitions, information, parameters,
+// and stream registrations must be complete before the first data or log write.
+// Writer methods and registered stream writes are safe for concurrent use;
+// concurrent writes are serialised, but their relative order is unspecified.
 type Writer struct {
 	mu            sync.Mutex
 	destination   io.Writer
@@ -76,8 +82,9 @@ type writerRegistration struct {
 	name      string
 }
 
-// NewWriter writes the ULog file header and flag-bits message to destination.
-// Close does not close destination.
+// NewWriter immediately writes the ULog file header and required flag-bits
+// message to destination. Neither [Writer.Close] nor a failed constructor closes
+// destination.
 func NewWriter(destination io.Writer, options ...WriterOption) (*Writer, error) {
 	if destination == nil {
 		return nil, errors.New("nil ULog destination")
@@ -121,8 +128,9 @@ func NewWriter(destination io.Writer, options ...WriterOption) (*Writer, error) 
 	return writer, nil
 }
 
-// Define writes a dynamic format definition. Definitions must be added before
-// the first data write. Repeating an identical definition is harmless.
+// Define validates and writes a dynamic [Format]. Definitions must be added
+// before the first data or log write. Repeating an identical definition is a
+// no-op; redefining the same name differently returns an error.
 func (w *Writer) Define(format Format) error {
 	if w == nil {
 		return errors.New("nil ULog writer")
@@ -132,8 +140,9 @@ func (w *Writer) Define(format Format) error {
 	return w.defineLocked(format)
 }
 
-// WriteInformation writes an initial typed information entry. Information must
-// be written before the first data or log message.
+// WriteInformation writes one initial metadata entry before the data section.
+// value may be a non-empty string or a scalar Go value supported by the ULog
+// primitive mapping. Calls after the first data or log write return an error.
 func (w *Writer) WriteInformation(name string, value any) error {
 	if w == nil {
 		return errors.New("nil ULog writer")
@@ -150,8 +159,9 @@ func (w *Writer) WriteInformation(name string, value any) error {
 	return w.writeMessageLocked(wire.MessageTypeInformation, wire.InformationMessage{Key: key, Value: encoded})
 }
 
-// WriteParameter writes an initial int32 or float32 parameter. Parameters must
-// be written before the first data or log message.
+// WriteParameter writes a vehicle parameter's value at the start of logging.
+// ULog permits int32 and float32 values. Calls after the first data or log write
+// return an error.
 func (w *Writer) WriteParameter(name string, value any) error {
 	if w == nil {
 		return errors.New("nil ULog writer")
@@ -176,7 +186,9 @@ func (w *Writer) WriteParameter(name string, value any) error {
 	return w.writeMessageLocked(wire.MessageTypeParameter, wire.ParameterMessage{Key: key, Value: encoded})
 }
 
-// WriteLog writes an untagged text message in the data section.
+// WriteLog writes untagged printf-style output in the data section. timestamp is
+// in microseconds. The first call starts the data section and prevents further
+// definitions, registrations, initial information, or initial parameters.
 func (w *Writer) WriteLog(level LogLevel, timestamp uint64, message string) error {
 	if w == nil {
 		return errors.New("nil ULog writer")
@@ -200,7 +212,9 @@ func (w *Writer) WriteLog(level LogLevel, timestamp uint64, message string) erro
 	})
 }
 
-// WriteDropout writes a logging dropout in whole milliseconds.
+// WriteDropout marks a period in which logging messages were lost. duration must
+// be a non-negative whole number of milliseconds no greater than 65,535 ms. The
+// first call starts the data section.
 func (w *Writer) WriteDropout(duration time.Duration) error {
 	if w == nil {
 		return errors.New("nil ULog writer")
@@ -275,8 +289,10 @@ func (w *Writer) defineLocked(format Format) error {
 	return nil
 }
 
-// RegisterFormat defines format and registers a raw data stream. Definitions
-// referenced by nested fields must first be added with [Writer.Define].
+// RegisterFormat validates and defines format, then registers a [RawStream]. The
+// format must contain a scalar uint64_t timestamp field. Definitions referenced
+// by nested fields must first be added with [Writer.Define]. Registration must
+// finish before the data section starts.
 func (w *Writer) RegisterFormat(format Format, options ...StreamOption) (*RawStream, error) {
 	if w == nil {
 		return nil, errors.New("nil ULog writer")
@@ -320,8 +336,11 @@ func (w *Writer) RegisterFormat(format Format, options ...StreamOption) (*RawStr
 	}, nil
 }
 
-// Register derives and defines the formats for T, then registers a typed data
-// stream. Data is encoded without Go struct padding.
+// Register derives the formats required by T using the same mapping as
+// [FormatsFor], defines them, then registers a typed [Stream]. T must contain an
+// exported scalar field that maps to the case-sensitive ULog name "timestamp"
+// and wire type uint64_t. Registration must finish before the data section
+// starts. Values are encoded in field order without Go struct padding.
 func Register[T any](writer *Writer, options ...StreamOption) (*Stream[T], error) {
 	if writer == nil {
 		return nil, errors.New("nil ULog writer")
@@ -398,14 +417,15 @@ func (w *Writer) registerLocked(name string, multiID uint8) (*writerRegistration
 	return registration, nil
 }
 
-// Stream writes values of T to one ULog subscription.
+// Stream writes values of T to one ULog subscription created by [Register].
 type Stream[T any] struct {
 	writer       *Writer
 	registration *writerRegistration
 	schema       *typedSchema
 }
 
-// Write encodes value according to the format derived during registration.
+// Write encodes value using the format fixed by [Register]. The first stream
+// write emits every registered subscription and starts the data section.
 func (s *Stream[T]) Write(value T) error {
 	if s == nil || s.writer == nil {
 		return errors.New("nil ULog stream")
@@ -417,7 +437,8 @@ func (s *Stream[T]) Write(value T) error {
 	return s.writer.writeData(s.registration, payload)
 }
 
-// RawStream writes already encoded data for one dynamic format.
+// RawStream writes payloads for one dynamic [Format] registered by
+// [Writer.RegisterFormat].
 type RawStream struct {
 	writer             *Writer
 	registration       *writerRegistration
@@ -479,8 +500,10 @@ func (w *Writer) startDataLocked() error {
 	return nil
 }
 
-// Close finishes the ULog stream without closing the underlying destination.
-// It is safe to call Close more than once.
+// Close writes any subscriptions not yet emitted, then prevents further writes.
+// It does not close the underlying destination and is safe to call more than
+// once. Close returns the first destination write error, including on later
+// calls.
 func (w *Writer) Close() error {
 	if w == nil {
 		return errors.New("nil ULog writer")

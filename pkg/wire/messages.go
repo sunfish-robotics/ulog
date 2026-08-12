@@ -32,13 +32,16 @@ var (
 	_ encoding.BinaryUnmarshaler = (*TaggedLoggingMessage)(nil)
 )
 
-// FormatMessage is the complete payload identified by [MessageTypeFormat].
+// FormatMessage defines the name and fields of one logged message format. A
+// format may refer to another [FormatMessage], including one that appears later
+// in the definitions section. Its message type is [MessageTypeFormat].
 type FormatMessage struct {
-	// Format contains the message name followed by its semicolon-delimited field declarations.
+	// Format uses the ULog grammar "message_name:type field;type field;".
 	Format string
 }
 
-// AppendBinary appends the ULog payload representation of m to dst.
+// AppendBinary appends m without a [MessageHeader] to dst. A validation error
+// returns dst unchanged.
 func (m FormatMessage) AppendBinary(dst []byte) ([]byte, error) {
 	if m.Format == "" {
 		return dst, errors.New("format must not be empty")
@@ -50,7 +53,8 @@ func (m FormatMessage) AppendBinary(dst []byte) ([]byte, error) {
 	return append(dst, m.Format...), nil
 }
 
-// UnmarshalBinary decodes a ULog format payload into m.
+// UnmarshalBinary validates and decodes a format payload without its
+// [MessageHeader]. A failed decode leaves m unchanged.
 func (m *FormatMessage) UnmarshalBinary(data []byte) error {
 	if m == nil {
 		return errors.New("unmarshal format message into nil receiver")
@@ -66,16 +70,18 @@ func (m *FormatMessage) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-// InformationMessage is the complete payload identified by
-// [MessageTypeInformation].
+// InformationMessage stores one typed metadata entry, such as a hardware or
+// software version. Information keys must be unique within a log. Its message
+// type is [MessageTypeInformation].
 type InformationMessage struct {
-	// Key contains the value type and key name.
+	// Key declares the value type and key name, for example "char[3] sys_name".
 	Key string
 	// Value contains the key's encoded value bytes.
 	Value []byte
 }
 
-// AppendBinary appends the ULog payload representation of m to dst.
+// AppendBinary appends m without a [MessageHeader] to dst. A validation error
+// returns dst unchanged.
 func (m InformationMessage) AppendBinary(dst []byte) ([]byte, error) {
 	keyLength, err := validateKeyValue(m.Key, len(m.Value), binary.Size(InformationHeader{}))
 	if err != nil {
@@ -86,7 +92,8 @@ func (m InformationMessage) AppendBinary(dst []byte) ([]byte, error) {
 	return appendKeyValue(dst, header, m.Key, m.Value)
 }
 
-// UnmarshalBinary decodes a ULog information payload into m.
+// UnmarshalBinary validates and decodes an information payload without its
+// [MessageHeader]. A failed decode leaves m unchanged.
 func (m *InformationMessage) UnmarshalBinary(data []byte) error {
 	if m == nil {
 		return errors.New("unmarshal information message into nil receiver")
@@ -108,18 +115,21 @@ func (m *InformationMessage) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-// MultiInformationMessage is the complete payload identified by
-// [MessageTypeMultiInformation].
+// MultiInformationMessage carries metadata split across several messages, or
+// repeated values for the same key. Consumers retain these messages in file
+// order. Its message type is [MessageTypeMultiInformation].
 type MultiInformationMessage struct {
-	// IsContinued is 1 when Value continues the previous message with the same Key.
+	// IsContinued is 1 when Value continues the previous message with the same Key,
+	// and 0 when it starts a new value.
 	IsContinued uint8
-	// Key contains the value type and key name.
+	// Key declares the complete value's type and key name.
 	Key string
 	// Value contains this part of the key's encoded value bytes.
 	Value []byte
 }
 
-// AppendBinary appends the ULog payload representation of m to dst.
+// AppendBinary appends m without a [MessageHeader] to dst. A validation error
+// returns dst unchanged.
 func (m MultiInformationMessage) AppendBinary(dst []byte) ([]byte, error) {
 	if err := validateContinuation(m.IsContinued); err != nil {
 		return dst, err
@@ -136,7 +146,8 @@ func (m MultiInformationMessage) AppendBinary(dst []byte) ([]byte, error) {
 	return appendKeyValue(dst, header, m.Key, m.Value)
 }
 
-// UnmarshalBinary decodes a ULog multi-information payload into m.
+// UnmarshalBinary validates and decodes a multi-information payload without its
+// [MessageHeader]. A failed decode leaves m unchanged.
 func (m *MultiInformationMessage) UnmarshalBinary(data []byte) error {
 	if m == nil {
 		return errors.New("unmarshal multi-information message into nil receiver")
@@ -165,15 +176,19 @@ func (m *MultiInformationMessage) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-// ParameterMessage is the complete payload identified by [MessageTypeParameter].
+// ParameterMessage records a vehicle parameter value. In the definitions
+// section it is the value at the start of logging; in the data section it is a
+// later change. ULog parameters are limited to int32_t and float values. Its
+// message type is [MessageTypeParameter].
 type ParameterMessage struct {
-	// Key contains the parameter type and name.
+	// Key declares the parameter type and name, for example "float MPC_XY_CRUISE".
 	Key string
 	// Value contains the parameter's encoded value bytes.
 	Value []byte
 }
 
-// AppendBinary appends the ULog payload representation of m to dst.
+// AppendBinary appends m without a [MessageHeader] to dst. A validation error
+// returns dst unchanged.
 func (m ParameterMessage) AppendBinary(dst []byte) ([]byte, error) {
 	keyLength, err := validateKeyValue(m.Key, len(m.Value), binary.Size(ParameterHeader{}))
 	if err != nil {
@@ -184,7 +199,9 @@ func (m ParameterMessage) AppendBinary(dst []byte) ([]byte, error) {
 	return appendKeyValue(dst, header, m.Key, m.Value)
 }
 
-// UnmarshalBinary decodes a ULog parameter payload into m.
+// UnmarshalBinary validates and decodes a parameter payload without its
+// [MessageHeader]. A failed decode leaves m unchanged. The codec does not enforce
+// ULog's parameter type restriction.
 func (m *ParameterMessage) UnmarshalBinary(data []byte) error {
 	if m == nil {
 		return errors.New("unmarshal parameter message into nil receiver")
@@ -206,18 +223,25 @@ func (m *ParameterMessage) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-// DefaultParameterMessage is the complete payload identified by
+// DefaultParameterMessage records a parameter's default value for one or more
+// vehicle configurations. [DefaultParameterMessage.Key] and
+// [DefaultParameterMessage.Value] use the same encoding as [ParameterMessage]. A
+// log need not provide every default: for each scope without an entry, the
+// parameter value is also its default. These messages may appear in either the
+// definitions or data section; in the definitions section, they precede the
+// first [SubscriptionMessage] or logging message. Its message type is
 // [MessageTypeDefaultParameter].
 type DefaultParameterMessage struct {
 	// Types contains [DefaultParameterTypes] scopes; at least one bit must be set.
 	Types DefaultParameterTypes
-	// Key contains the parameter type and name.
+	// Key declares the parameter type and name. ULog permits int32_t and float.
 	Key string
 	// Value contains the parameter's encoded default value bytes.
 	Value []byte
 }
 
-// AppendBinary appends the ULog payload representation of m to dst.
+// AppendBinary appends m without a [MessageHeader] to dst. A validation error
+// returns dst unchanged.
 func (m DefaultParameterMessage) AppendBinary(dst []byte) ([]byte, error) {
 	if m.Types == 0 {
 		return dst, errors.New("default parameter types must not be zero")
@@ -234,7 +258,9 @@ func (m DefaultParameterMessage) AppendBinary(dst []byte) ([]byte, error) {
 	return appendKeyValue(dst, header, m.Key, m.Value)
 }
 
-// UnmarshalBinary decodes a ULog default-parameter payload into m.
+// UnmarshalBinary validates and decodes a default-parameter payload without its
+// [MessageHeader]. A failed decode leaves m unchanged. The codec does not enforce
+// ULog's parameter type restriction.
 func (m *DefaultParameterMessage) UnmarshalBinary(data []byte) error {
 	if m == nil {
 		return errors.New("unmarshal default-parameter message into nil receiver")
@@ -259,8 +285,9 @@ func (m *DefaultParameterMessage) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-// SubscriptionMessage is the complete payload identified by
-// [MessageTypeSubscription].
+// SubscriptionMessage assigns a runtime message ID to one instance of a named
+// format. It must precede every [DataMessage] that uses that ID. Its message type
+// is [MessageTypeSubscription].
 type SubscriptionMessage struct {
 	// MultiID identifies an instance of a message format; the first and default instance is zero.
 	MultiID uint8
@@ -270,7 +297,8 @@ type SubscriptionMessage struct {
 	MessageName string
 }
 
-// AppendBinary appends the ULog payload representation of m to dst.
+// AppendBinary appends m without a [MessageHeader] to dst. A validation error
+// returns dst unchanged.
 func (m SubscriptionMessage) AppendBinary(dst []byte) ([]byte, error) {
 	if m.MessageName == "" {
 		return dst, errors.New("subscription message name must not be empty")
@@ -287,7 +315,8 @@ func (m SubscriptionMessage) AppendBinary(dst []byte) ([]byte, error) {
 	return append(encoded, m.MessageName...), nil
 }
 
-// UnmarshalBinary decodes a ULog subscription payload into m.
+// UnmarshalBinary validates and decodes a subscription payload without its
+// [MessageHeader]. A failed decode leaves m unchanged.
 func (m *SubscriptionMessage) UnmarshalBinary(data []byte) error {
 	if m == nil {
 		return errors.New("unmarshal subscription message into nil receiver")
@@ -312,7 +341,9 @@ func (m *SubscriptionMessage) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-// DataMessage is the complete payload identified by [MessageTypeData].
+// DataMessage carries one logged value for a previously declared
+// [SubscriptionMessage]. The subscription selects the format used to interpret
+// [DataMessage.Data]. Its message type is [MessageTypeData].
 type DataMessage struct {
 	// MessageID identifies the [SubscriptionMessage.MessageID] that defines Data.
 	MessageID uint16
@@ -320,7 +351,8 @@ type DataMessage struct {
 	Data []byte
 }
 
-// AppendBinary appends the ULog payload representation of m to dst.
+// AppendBinary appends m without a [MessageHeader] to dst. A validation error
+// returns dst unchanged.
 func (m DataMessage) AppendBinary(dst []byte) ([]byte, error) {
 	if err := validatePayloadSize(binary.Size(DataHeader{}) + len(m.Data)); err != nil {
 		return dst, err
@@ -334,7 +366,8 @@ func (m DataMessage) AppendBinary(dst []byte) ([]byte, error) {
 	return append(encoded, m.Data...), nil
 }
 
-// UnmarshalBinary decodes a ULog data payload into m.
+// UnmarshalBinary validates and decodes a data payload without its
+// [MessageHeader]. A failed decode leaves m unchanged.
 func (m *DataMessage) UnmarshalBinary(data []byte) error {
 	if m == nil {
 		return errors.New("unmarshal data message into nil receiver")
@@ -352,7 +385,8 @@ func (m *DataMessage) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-// LoggingMessage is the complete payload identified by [MessageTypeLogging].
+// LoggingMessage carries untagged printf-style log output from the vehicle. Its
+// message type is [MessageTypeLogging].
 type LoggingMessage struct {
 	// Level is the [LogLevel] for the message.
 	Level LogLevel
@@ -362,7 +396,8 @@ type LoggingMessage struct {
 	Message string
 }
 
-// AppendBinary appends the ULog payload representation of m to dst.
+// AppendBinary appends m without a [MessageHeader] to dst. A validation error
+// returns dst unchanged.
 func (m LoggingMessage) AppendBinary(dst []byte) ([]byte, error) {
 	if err := validateLogLevel(m.Level); err != nil {
 		return dst, err
@@ -379,7 +414,8 @@ func (m LoggingMessage) AppendBinary(dst []byte) ([]byte, error) {
 	return append(encoded, m.Message...), nil
 }
 
-// UnmarshalBinary decodes a ULog logging payload into m.
+// UnmarshalBinary validates and decodes a logging payload without its
+// [MessageHeader]. A failed decode leaves m unchanged.
 func (m *LoggingMessage) UnmarshalBinary(data []byte) error {
 	if m == nil {
 		return errors.New("unmarshal logging message into nil receiver")
@@ -400,8 +436,9 @@ func (m *LoggingMessage) UnmarshalBinary(data []byte) error {
 	return nil
 }
 
-// TaggedLoggingMessage is the complete payload identified by
-// [MessageTypeTaggedLogging].
+// TaggedLoggingMessage carries printf-style log output with an application-
+// defined source tag, such as a process, thread, or class identifier. Its
+// message type is [MessageTypeTaggedLogging].
 type TaggedLoggingMessage struct {
 	// Level is the [LogLevel] for the message.
 	Level LogLevel
@@ -413,7 +450,8 @@ type TaggedLoggingMessage struct {
 	Message string
 }
 
-// AppendBinary appends the ULog payload representation of m to dst.
+// AppendBinary appends m without a [MessageHeader] to dst. A validation error
+// returns dst unchanged.
 func (m TaggedLoggingMessage) AppendBinary(dst []byte) ([]byte, error) {
 	if err := validateLogLevel(m.Level); err != nil {
 		return dst, err
@@ -430,7 +468,8 @@ func (m TaggedLoggingMessage) AppendBinary(dst []byte) ([]byte, error) {
 	return append(encoded, m.Message...), nil
 }
 
-// UnmarshalBinary decodes a ULog tagged-logging payload into m.
+// UnmarshalBinary validates and decodes a tagged-logging payload without its
+// [MessageHeader]. A failed decode leaves m unchanged.
 func (m *TaggedLoggingMessage) UnmarshalBinary(data []byte) error {
 	if m == nil {
 		return errors.New("unmarshal tagged-logging message into nil receiver")

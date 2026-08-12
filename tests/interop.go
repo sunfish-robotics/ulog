@@ -56,7 +56,8 @@ type oracleField struct {
 	Values []float64 `json:"values"`
 }
 
-// RunPyULogTest verifies bidirectional interoperability with pyulog.
+// RunPyULogTest generates a ULog with Go, inspects and rewrites it with pyulog,
+// then verifies the rewritten log with the Go reader.
 func RunPyULogTest(t *testing.T) {
 	uvPath, err := exec.LookPath("uv")
 	if err != nil {
@@ -254,7 +255,8 @@ func runPyULogOracle(t *testing.T, uvPath string, arguments ...string) []byte {
 	return output
 }
 
-// RunFixtureTest verifies that the Go reader accepts the committed pyulog fixture.
+// RunFixtureTest reads the committed pyulog fixture and verifies its header,
+// metadata, events, and dataset values.
 func RunFixtureTest(t *testing.T) {
 	source, err := os.Open("testdata/pyulog-1.2.4.ulg") // #nosec G304 -- repository fixture path is constant.
 	if err != nil {

@@ -13,14 +13,17 @@ import (
 	"github.com/sunfish-robotics/ulog/pkg/wire"
 )
 
-// Header contains the fixed information at the start of a ULog file.
+// Header contains the ULog version and the logging start time from the fixed
+// file header.
 type Header struct {
-	Version   uint8
+	// Version is the file-format version declared by the log.
+	Version uint8
+	// Timestamp is when logging started, in microseconds.
 	Timestamp uint64
 }
 
-// Reader reads data records from a ULog stream. It resolves format definitions
-// and subscriptions while advancing through the stream.
+// Reader streams format-resolved [Record] values from ULog. As [Reader.Next]
+// advances, it also collects information, parameters, logs, and dropouts.
 type Reader struct {
 	source        io.Reader
 	header        Header
@@ -57,7 +60,9 @@ type layoutField struct {
 	hidden bool
 }
 
-// NewReader reads and validates the fixed ULog file header from source.
+// NewReader consumes the fixed file header from source and checks its magic
+// bytes. It accepts later file-format versions for forward compatibility and
+// does not close source.
 func NewReader(source io.Reader) (*Reader, error) {
 	if source == nil {
 		return nil, errors.New("nil ULog source")
@@ -86,13 +91,17 @@ func NewReader(source io.Reader) (*Reader, error) {
 	}, nil
 }
 
-// Header returns the file header read by [NewReader].
+// Header returns the version and logging start time consumed by [NewReader]. It
+// is available before the first call to [Reader.Next].
 func (r *Reader) Header() Header {
 	return r.header
 }
 
-// Next advances to the next data record. Definition and state messages are
-// consumed internally. It returns false at the end of the stream or on error.
+// Next consumes messages until it reaches the next data record. It returns false
+// at end of stream or after the first error; call [Reader.Err] to distinguish
+// the two. Definition, subscription, metadata, log, and dropout messages update
+// the reader's state without producing a record. Unknown message types are
+// skipped unless the log advertises an unsupported incompatibility feature.
 func (r *Reader) Next() bool {
 	if r == nil || r.err != nil {
 		return false
@@ -123,12 +132,14 @@ func (r *Reader) Next() bool {
 	}
 }
 
-// Record returns the record selected by the most recent successful [Reader.Next].
+// Record returns the [Record] selected by the most recent successful
+// [Reader.Next]. Its value is unchanged after Next returns false.
 func (r *Reader) Record() Record {
 	return r.record
 }
 
-// Err returns the first error encountered while advancing the reader.
+// Err returns the first error encountered by [Reader.Next], or nil after a clean
+// end of stream.
 func (r *Reader) Err() error {
 	if r == nil {
 		return errors.New("nil ULog reader")
@@ -136,7 +147,8 @@ func (r *Reader) Err() error {
 	return r.err
 }
 
-// Information returns typed information entries encountered so far.
+// Information returns independent copies of the typed metadata entries
+// encountered so far, in file order.
 func (r *Reader) Information() []KeyValue {
 	if r == nil {
 		return nil
@@ -144,7 +156,8 @@ func (r *Reader) Information() []KeyValue {
 	return cloneKeyValues(r.information)
 }
 
-// Parameters returns parameter entries encountered so far.
+// Parameters returns independent copies of the initial parameter values and
+// later changes encountered so far, in file order.
 func (r *Reader) Parameters() []KeyValue {
 	if r == nil {
 		return nil
@@ -152,7 +165,8 @@ func (r *Reader) Parameters() []KeyValue {
 	return cloneKeyValues(r.parameters)
 }
 
-// DefaultParameters returns default parameter entries encountered so far.
+// DefaultParameters returns independent copies of the parameter defaults
+// encountered so far, in file order. Missing defaults are not synthesised.
 func (r *Reader) DefaultParameters() []DefaultParameter {
 	if r == nil {
 		return nil
@@ -160,7 +174,8 @@ func (r *Reader) DefaultParameters() []DefaultParameter {
 	return cloneDefaultParameters(r.defaults)
 }
 
-// Logs returns tagged and untagged text messages encountered so far.
+// Logs returns the tagged and untagged text messages encountered so far, in file
+// order.
 func (r *Reader) Logs() []LogEntry {
 	if r == nil {
 		return nil
@@ -168,7 +183,8 @@ func (r *Reader) Logs() []LogEntry {
 	return append([]LogEntry(nil), r.logs...)
 }
 
-// Dropouts returns logging dropouts encountered so far.
+// Dropouts returns the periods of lost logging messages encountered so far, in
+// file order.
 func (r *Reader) Dropouts() []Dropout {
 	if r == nil {
 		return nil
@@ -460,21 +476,28 @@ func cloneFormat(format Format) Format {
 	return format
 }
 
-// FieldValue is one dynamically decoded scalar field. Arrays and nested
-// formats use paths such as "q[0]" and "position.x".
+// FieldValue is one dynamically decoded scalar from a [Record]. [FieldValue.Name]
+// is flattened: arrays and nested formats use paths such as "q[0]" and
+// "position.x".
 type FieldValue struct {
-	Name  string
-	Type  Type
+	// Name is the flattened field path.
+	Name string
+	// Type is the primitive wire type of Value.
+	Type Type
+	// Value has the Go scalar type corresponding to Type.
 	Value any
 }
 
 // ScalarField describes one flattened, non-padding scalar in a [Record].
 type ScalarField struct {
+	// Name is the flattened field path.
 	Name string
+	// Type is the field's primitive wire type.
 	Type Type
 }
 
-// Record is one format-resolved ULog data message.
+// Record is one ULog data message paired with the subscription and [Format]
+// needed to interpret it.
 type Record struct {
 	messageID uint16
 	multiID   uint8
@@ -483,19 +506,24 @@ type Record struct {
 	data      []byte
 }
 
-// Name returns the subscribed format name.
+// Name returns the case-sensitive [Format.Name] selected by the record's
+// subscription.
 func (r Record) Name() string { return r.format.Name }
 
-// MessageID returns the runtime subscription identifier.
+// MessageID returns the runtime subscription identifier. It is only meaningful
+// within this log.
 func (r Record) MessageID() uint16 { return r.messageID }
 
-// MultiID returns the subscribed instance identifier.
+// MultiID returns the instance identifier for the subscribed format. Zero is the
+// first and default instance.
 func (r Record) MultiID() uint8 { return r.multiID }
 
-// Format returns an independent copy of the record's dynamic schema.
+// Format returns an independent copy of the dynamic schema selected by the
+// record's subscription.
 func (r Record) Format() Format { return cloneFormat(r.format) }
 
-// Fields returns flattened, non-padding scalar fields in wire order.
+// Fields returns flattened, non-padding scalar fields in wire order. The names
+// are accepted by [Record.Value].
 func (r Record) Fields() []ScalarField {
 	fields := make([]ScalarField, 0, len(r.layout))
 	for _, field := range r.layout {
@@ -507,7 +535,9 @@ func (r Record) Fields() []ScalarField {
 	return fields
 }
 
-// Bytes returns an independent copy of the format-defined payload.
+// Bytes returns an independent copy of the raw bytes described by
+// [Record.Format], excluding the subscription ID and enclosing message header.
+// The payload may omit trailing top-level padding permitted by ULog.
 func (r Record) Bytes() []byte { return bytes.Clone(r.data) }
 
 // Values decodes every available non-padding scalar field in wire order.
@@ -535,7 +565,8 @@ func (r Record) Values() ([]FieldValue, error) {
 	return values, nil
 }
 
-// Value decodes a scalar field by its flattened path.
+// Value decodes a scalar field by its flattened path. It reports an error when
+// the field is unknown, omitted as trailing data, or truncated.
 func (r Record) Value(name string) (any, error) {
 	values, err := r.Values()
 	if err != nil {

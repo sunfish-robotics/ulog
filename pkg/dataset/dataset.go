@@ -8,7 +8,7 @@ import (
 	"github.com/sunfish-robotics/ulog"
 )
 
-// File is an eager, column-oriented view of a ULog stream.
+// File owns the datasets and metadata loaded from one complete ULog stream.
 type File struct {
 	header      ulog.Header
 	datasets    []*Dataset
@@ -25,7 +25,9 @@ type datasetKey struct {
 	multiID uint8
 }
 
-// Read consumes source and groups its data records into datasets.
+// Read consumes source to the end and groups records by format name and multi ID.
+// It returns no partial [File] if the ULog stream is invalid. Read does not close
+// source.
 func Read(source io.Reader) (*File, error) {
 	reader, err := ulog.NewReader(source)
 	if err != nil {
@@ -59,7 +61,7 @@ func Read(source io.Reader) (*File, error) {
 	return file, nil
 }
 
-// Header returns the file header.
+// Header returns the ULog version and logging start time read by [Read].
 func (f *File) Header() ulog.Header {
 	if f == nil {
 		return ulog.Header{}
@@ -67,7 +69,8 @@ func (f *File) Header() ulog.Header {
 	return f.header
 }
 
-// Information returns typed information entries in file order.
+// Information returns independent copies of the typed metadata entries in file
+// order.
 func (f *File) Information() []ulog.KeyValue {
 	if f == nil {
 		return nil
@@ -75,7 +78,8 @@ func (f *File) Information() []ulog.KeyValue {
 	return cloneKeyValues(f.information)
 }
 
-// Parameters returns parameter entries in file order, including changes.
+// Parameters returns independent copies of the initial parameter values and
+// later changes in file order.
 func (f *File) Parameters() []ulog.KeyValue {
 	if f == nil {
 		return nil
@@ -83,7 +87,8 @@ func (f *File) Parameters() []ulog.KeyValue {
 	return cloneKeyValues(f.parameters)
 }
 
-// DefaultParameters returns default parameter entries in file order.
+// DefaultParameters returns independent copies of the parameter defaults in file
+// order. Missing defaults are not synthesised.
 func (f *File) DefaultParameters() []ulog.DefaultParameter {
 	if f == nil {
 		return nil
@@ -91,7 +96,7 @@ func (f *File) DefaultParameters() []ulog.DefaultParameter {
 	return cloneDefaultParameters(f.defaults)
 }
 
-// Logs returns tagged and untagged text messages in file order.
+// Logs returns the tagged and untagged text messages in file order.
 func (f *File) Logs() []ulog.LogEntry {
 	if f == nil {
 		return nil
@@ -99,7 +104,7 @@ func (f *File) Logs() []ulog.LogEntry {
 	return append([]ulog.LogEntry(nil), f.logs...)
 }
 
-// Dropouts returns logging dropouts in file order.
+// Dropouts returns the periods of lost logging messages in file order.
 func (f *File) Dropouts() []ulog.Dropout {
 	if f == nil {
 		return nil
@@ -115,7 +120,8 @@ func (f *File) Datasets() []*Dataset {
 	return append([]*Dataset(nil), f.datasets...)
 }
 
-// Dataset returns the dataset for a format name and instance identifier.
+// Dataset returns the dataset for the case-sensitive format name and instance
+// identifier, or an error if [Read] saw no matching data record.
 func (f *File) Dataset(name string, multiID uint8) (*Dataset, error) {
 	if f == nil {
 		return nil, errors.New("nil ULog file")
@@ -127,7 +133,9 @@ func (f *File) Dataset(name string, multiID uint8) (*Dataset, error) {
 	return dataset, nil
 }
 
-// Dataset contains all records for one format name and instance identifier.
+// Dataset contains every record for one format name and multi ID. Each flattened
+// scalar field has a [Column]; a record that omits compatible trailing fields
+// contributes nulls to the corresponding columns.
 type Dataset struct {
 	name        string
 	multiID     uint8
@@ -174,7 +182,7 @@ func (d *Dataset) appendRecord(record ulog.Record) error {
 	return nil
 }
 
-// Name returns the dataset's format name.
+// Name returns the case-sensitive format name used to group the dataset.
 func (d *Dataset) Name() string {
 	if d == nil {
 		return ""
@@ -182,7 +190,8 @@ func (d *Dataset) Name() string {
 	return d.name
 }
 
-// MultiID returns the dataset's instance identifier.
+// MultiID returns the format's instance identifier. Zero is the first and
+// default instance.
 func (d *Dataset) MultiID() uint8 {
 	if d == nil {
 		return 0
@@ -190,7 +199,8 @@ func (d *Dataset) MultiID() uint8 {
 	return d.multiID
 }
 
-// Format returns an independent copy of the dataset schema.
+// Format returns an independent copy of the [ulog.Format] that defined the
+// dataset's first record.
 func (d *Dataset) Format() ulog.Format {
 	if d == nil {
 		return ulog.Format{}
@@ -198,7 +208,8 @@ func (d *Dataset) Format() ulog.Format {
 	return cloneFormat(d.format)
 }
 
-// Len returns the number of records in the dataset.
+// Len returns the number of data records in the dataset, including records with
+// null trailing fields.
 func (d *Dataset) Len() int {
 	if d == nil {
 		return 0
@@ -206,7 +217,8 @@ func (d *Dataset) Len() int {
 	return d.length
 }
 
-// Columns returns the flattened scalar columns in wire order.
+// Columns returns the flattened, non-padding scalar columns in wire order.
+// Mutating the returned slice does not change the dataset.
 func (d *Dataset) Columns() []Column {
 	if d == nil {
 		return nil
@@ -214,7 +226,8 @@ func (d *Dataset) Columns() []Column {
 	return append([]Column(nil), d.columns...)
 }
 
-// Column returns a flattened scalar column by name.
+// Column returns a flattened scalar column by its case-sensitive path, such as
+// "q[0]" or "position.x".
 func (d *Dataset) Column(name string) (Column, bool) {
 	if d == nil {
 		return Column{}, false
@@ -226,9 +239,9 @@ func (d *Dataset) Column(name string) (Column, bool) {
 	return d.columns[index], true
 }
 
-// Column is a nullable, primitive-typed dataset column. Values returns one of
-// []int8, []uint8, []int16, []uint16, []int32, []uint32, []int64, []uint64,
-// []float32, []float64, or []bool according to ulog.Type.
+// Column is a nullable, primitive-typed dataset column. [Column.Values] returns
+// one of []int8, []uint8, []int16, []uint16, []int32, []uint32, []int64,
+// []uint64, []float32, []float64, or []bool according to [Column.Type].
 type Column struct {
 	name   string
 	typeID ulog.Type
@@ -322,7 +335,7 @@ func (c Column) Type() ulog.Type { return c.typeID }
 func (c Column) Len() int { return len(c.valid) }
 
 // Values returns an independent copy of the typed values. Null rows contain the
-// primitive type's zero value; use Value to distinguish them.
+// primitive type's zero value; use [Column.Value] to distinguish them.
 func (c Column) Values() any {
 	switch values := c.values.(type) {
 	case []int8:

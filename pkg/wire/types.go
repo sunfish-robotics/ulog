@@ -5,18 +5,23 @@
 // in Header contain only a fixed payload prefix. Types ending in Message
 // represent a complete payload; variable-width messages implement
 // encoding.BinaryAppender and encoding.BinaryUnmarshaler.
+//
+// The [PX4 ULog specification] defines the protocol semantics represented here.
+//
+// [PX4 ULog specification]: https://docs.px4.io/main/en/dev_log/ulog_file_format
 package wire
 
-// FileMagic is the seven-byte sequence stored in [FileHeader.Magic].
+// FileMagic is the seven-byte ULog file signature required at offset zero.
 const FileMagic = "ULog\x01\x12\x35"
 
-// FileVersion is the current value of [FileHeader.Version].
+// FileVersion is the format-version byte emitted by the writer.
 const FileVersion uint8 = 1
 
-// SyncMagic is the fixed value of [SynchronizationMessage.Magic].
+// SyncMagic is the byte sequence a recovery parser can search for after a
+// corrupt message.
 const SyncMagic = "\x2f\x73\x13\x20\x25\x0c\xbb\x12"
 
-// PrimitiveType identifies a primitive type used in a format definition.
+// PrimitiveType is the case-sensitive type spelling used in a format definition.
 type PrimitiveType string
 
 const (
@@ -46,7 +51,8 @@ const (
 	PrimitiveTypeChar PrimitiveType = "char"
 )
 
-// MessageType identifies the payload following a [MessageHeader].
+// MessageType is the one-byte tag identifying the payload after a
+// [MessageHeader].
 type MessageType uint8
 
 const (
@@ -78,7 +84,8 @@ const (
 	MessageTypeDropout MessageType = 'O'
 )
 
-// CompatibilityFlags identifies features that older parsers may safely ignore.
+// CompatibilityFlags advertises optional features that do not change how an
+// older parser reads the rest of the log.
 type CompatibilityFlags uint64
 
 const (
@@ -86,7 +93,8 @@ const (
 	CompatibilityFlagDefaultParameters CompatibilityFlags = 1 << 0
 )
 
-// IncompatibilityFlags identifies features that require explicit parser support.
+// IncompatibilityFlags advertises features that change how the log must be read.
+// A parser must reject any set bit it does not support.
 type IncompatibilityFlags uint64
 
 const (
@@ -94,7 +102,8 @@ const (
 	IncompatibilityFlagDataAppended IncompatibilityFlags = 1 << 0
 )
 
-// DefaultParameterTypes identifies the scopes to which a default value applies.
+// DefaultParameterTypes identifies the independent configuration scopes to
+// which a [DefaultParameterMessage] applies. At least one scope must be set.
 type DefaultParameterTypes uint8
 
 const (
@@ -126,7 +135,8 @@ const (
 	LogLevelDebug LogLevel = '7'
 )
 
-// FileHeader is the fixed 16-byte header at the start of a ULog file.
+// FileHeader is the fixed 16-byte little-endian header at the start of a ULog
+// file.
 type FileHeader struct {
 	// Magic identifies the file as ULog and must equal [FileMagic].
 	Magic [7]byte
@@ -136,7 +146,8 @@ type FileHeader struct {
 	Timestamp uint64
 }
 
-// MessageHeader precedes every message in the definitions and data sections.
+// MessageHeader is the three-byte little-endian frame before every message in
+// the definitions and data sections.
 type MessageHeader struct {
 	// Size is the payload size in bytes, excluding this header.
 	Size uint16
@@ -144,9 +155,11 @@ type MessageHeader struct {
 	Type MessageType
 }
 
-// FlagBitsMessage is the fixed 40-byte payload identified by
-// [MessageTypeFlagBits]. It can be encoded and decoded directly with
-// encoding/binary.
+// FlagBitsMessage tells a parser which optional and incompatible ULog features
+// are present. It represents the first 40 payload bytes and must be the first
+// message after [FileHeader]. Those bytes can be encoded and decoded directly
+// with encoding/binary; parsers must tolerate future trailing bytes. Its message
+// type is [MessageTypeFlagBits].
 type FlagBitsMessage struct {
 	// CompatibilityFlags identifies features compatible with existing parsers.
 	CompatibilityFlags CompatibilityFlags
@@ -156,10 +169,11 @@ type FlagBitsMessage struct {
 	AppendedOffsets [3]uint64
 }
 
-// FlagBits is an alias for [FlagBitsMessage].
+// FlagBits is the former name of [FlagBitsMessage] and remains for source
+// compatibility.
 type FlagBits = FlagBitsMessage
 
-// InformationHeader precedes an information message's key and value bytes.
+// InformationHeader is the fixed prefix of an [InformationMessage].
 // [InformationHeader.KeyLength] bytes of key follow it; all remaining payload
 // bytes are the value.
 type InformationHeader struct {
@@ -167,7 +181,7 @@ type InformationHeader struct {
 	KeyLength uint8
 }
 
-// MultiInformationHeader precedes a multi-information message's key and value.
+// MultiInformationHeader is the fixed prefix of a [MultiInformationMessage].
 // [MultiInformationHeader.IsContinued] is 1 when the value continues the
 // previous message with this key.
 type MultiInformationHeader struct {
@@ -177,13 +191,15 @@ type MultiInformationHeader struct {
 	KeyLength uint8
 }
 
-// ParameterHeader precedes a parameter message's key and value bytes.
+// ParameterHeader is the fixed prefix of a [ParameterMessage]. Its key and
+// encoded value follow.
 type ParameterHeader struct {
 	// KeyLength is the key length in bytes.
 	KeyLength uint8
 }
 
-// DefaultParameterHeader precedes a default parameter message's key and value.
+// DefaultParameterHeader is the fixed prefix of a [DefaultParameterMessage].
+// Its key and encoded value follow.
 type DefaultParameterHeader struct {
 	// Types contains [DefaultParameterTypes] scopes; at least one bit must be set.
 	Types DefaultParameterTypes
@@ -191,7 +207,8 @@ type DefaultParameterHeader struct {
 	KeyLength uint8
 }
 
-// SubscriptionHeader precedes the message name in a subscription payload.
+// SubscriptionHeader is the fixed prefix of a [SubscriptionMessage]. The name
+// of a previously defined [FormatMessage] follows.
 type SubscriptionHeader struct {
 	// MultiID identifies an instance of a message format; the first and default instance is zero.
 	MultiID uint8
@@ -199,24 +216,29 @@ type SubscriptionHeader struct {
 	MessageID uint16
 }
 
-// UnsubscriptionMessage is the fixed two-byte payload identified by
-// [MessageTypeUnsubscription]. It can be encoded and decoded directly with
-// encoding/binary.
+// UnsubscriptionMessage ends the subscription identified by
+// [UnsubscriptionMessage.MessageID]. Later [DataMessage] values therefore have
+// no active format for that ID. The payload can be encoded and decoded directly
+// with encoding/binary. Its message type is
+// [MessageTypeUnsubscription].
 type UnsubscriptionMessage struct {
 	// MessageID identifies the [SubscriptionHeader.MessageID] that will no longer be logged.
 	MessageID uint16
 }
 
-// Unsubscription is an alias for [UnsubscriptionMessage].
+// Unsubscription is the former name of [UnsubscriptionMessage] and remains for
+// source compatibility.
 type Unsubscription = UnsubscriptionMessage
 
-// DataHeader precedes the format-defined bytes in a logged data payload.
+// DataHeader is the fixed prefix of a [DataMessage]. The bytes encoded according
+// to the selected [FormatMessage] follow.
 type DataHeader struct {
 	// MessageID identifies the [SubscriptionHeader.MessageID] that defines the following data bytes.
 	MessageID uint16
 }
 
-// LoggingHeader precedes the message bytes in an untagged logging payload.
+// LoggingHeader is the fixed prefix of a [LoggingMessage]. The untagged log text
+// follows without a terminating null byte.
 type LoggingHeader struct {
 	// Level is the [LogLevel] for the message.
 	Level LogLevel
@@ -224,7 +246,8 @@ type LoggingHeader struct {
 	Timestamp uint64
 }
 
-// TaggedLoggingHeader precedes the message bytes in a tagged logging payload.
+// TaggedLoggingHeader is the fixed prefix of a [TaggedLoggingMessage]. The log
+// text follows without a terminating null byte.
 type TaggedLoggingHeader struct {
 	// Level is the [LogLevel] for the message.
 	Level LogLevel
@@ -234,24 +257,26 @@ type TaggedLoggingHeader struct {
 	Timestamp uint64
 }
 
-// SynchronizationMessage is the fixed eight-byte payload identified by
-// [MessageTypeSynchronization]. It can be encoded and decoded directly with
-// encoding/binary.
+// SynchronizationMessage gives a parser a known byte sequence from which it can
+// resume after a corrupt message. It can be encoded and decoded directly with
+// encoding/binary. Its message type is [MessageTypeSynchronization].
 type SynchronizationMessage struct {
 	// Magic is the fixed synchronization sequence in [SyncMagic].
 	Magic [8]byte
 }
 
-// Synchronization is an alias for [SynchronizationMessage].
+// Synchronization is the former name of [SynchronizationMessage] and remains
+// for source compatibility.
 type Synchronization = SynchronizationMessage
 
-// DropoutMessage is the fixed two-byte payload identified by
-// [MessageTypeDropout]. [DropoutMessage.Duration] is in milliseconds. It can be
-// encoded and decoded directly with encoding/binary.
+// DropoutMessage marks a period in which logging messages were lost, often
+// because the logging device could not keep up. It can be encoded and decoded
+// directly with encoding/binary. Its message type is [MessageTypeDropout].
 type DropoutMessage struct {
 	// Duration is the period of lost logging messages in milliseconds.
 	Duration uint16
 }
 
-// Dropout is an alias for [DropoutMessage].
+// Dropout is the former name of [DropoutMessage] and remains for source
+// compatibility.
 type Dropout = DropoutMessage
