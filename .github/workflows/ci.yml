@@ -66,11 +66,11 @@ jobs:
         with:
           python-version: 3.14.2
       - run: python -m pip install --disable-pip-version-check uv==0.12.3
-      - run: uv sync --frozen --project integration/pyulog
+      - run: uv sync --frozen --project tests
       - name: Test Go and pyulog interoperability
         env:
           ULOG_INTEROP_ARTIFACT_DIR: ${{ github.workspace }}/artifacts/pyulog
-        run: go test -tags=pyulog -run PyULog -count=1 -v .
+        run: go test -tags=pyulog -run PyULog -count=1 -v ./tests
       - name: Retain failing ULog files
         if: failure()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

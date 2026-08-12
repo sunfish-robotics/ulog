@@ -4,5 +4,5 @@
 // each file. [FormatFor], [Decode], and [Register] provide optional typed Go
 // adapters over that dynamic model. [Read] builds eager column-oriented
 // datasets for analysis; Apache Arrow and Parquet conversion lives in the
-// separate columnar package.
+// separate pkg/columnar package.
 package ulog

@@ -1,6 +1,5 @@
-//go:build pyulog
-
-package ulog
+// Package tests contains external interoperability tests and their fixtures.
+package tests
 
 import (
 	"context"
@@ -12,6 +11,8 @@ import (
 	"reflect"
 	"testing"
 	"time"
+
+	"github.com/sunfish-robotics/ulog"
 )
 
 type pyulogSample struct {
@@ -54,13 +55,18 @@ type oracleField struct {
 	Values []float64 `json:"values"`
 }
 
-func TestPyULogReadsGoAndGoReadsPyULog(t *testing.T) {
+// RunPyULogTest verifies bidirectional interoperability with pyulog.
+func RunPyULogTest(t *testing.T) {
+	uvPath, err := exec.LookPath("uv")
+	if err != nil {
+		t.Skip("uv is not available on PATH")
+	}
 	artifacts := interopArtifactDir(t)
 	goFile := filepath.Join(artifacts, "go-generated.ulg")
 	pythonFile := filepath.Join(artifacts, "pyulog-rewritten.ulg")
 	writePyULogFixture(t, goFile)
 
-	output := runPyULogOracle(t, "inspect", goFile)
+	output := runPyULogOracle(t, uvPath, "inspect", goFile)
 	var got oracleDocument
 	if err := json.Unmarshal(output, &got); err != nil {
 		t.Fatalf("decode pyulog inspection: %v\n%s", err, output)
@@ -69,7 +75,7 @@ func TestPyULogReadsGoAndGoReadsPyULog(t *testing.T) {
 		StartTimestamp:    424,
 		Information:       map[string]any{"build_id": float64(0x10203040), "system_name": "sunfish"},
 		InitialParameters: map[string]float64{"gain": 1.25},
-		Logs:              []oracleLog{{Level: uint8(LogLevelInfo), Timestamp: 2500, Message: "ready"}},
+		Logs:              []oracleLog{{Level: uint8(ulog.LogLevelInfo), Timestamp: 2500, Message: "ready"}},
 		Dropouts:          []oracleDropout{{Duration: 25, Timestamp: 2000}},
 		Datasets: []oracleDataset{
 			{
@@ -104,8 +110,8 @@ func TestPyULogReadsGoAndGoReadsPyULog(t *testing.T) {
 		t.Errorf("pyulog inspection = %#v, want %#v", got, want)
 	}
 
-	runPyULogOracle(t, "rewrite", goFile, pythonFile)
-	rewritten, err := os.Open(pythonFile)
+	runPyULogOracle(t, uvPath, "rewrite", goFile, pythonFile)
+	rewritten, err := os.Open(pythonFile) // #nosec G304 -- test path is created under the controlled artifact directory.
 	if err != nil {
 		t.Fatalf("open pyulog rewrite: %v", err)
 	}
@@ -114,26 +120,26 @@ func TestPyULogReadsGoAndGoReadsPyULog(t *testing.T) {
 			t.Errorf("close pyulog rewrite: %v", err)
 		}
 	}()
-	file, err := Read(rewritten)
+	file, err := ulog.Read(rewritten)
 	if err != nil {
-		t.Fatalf("Read(pyulog rewrite) error = %v", err)
+		t.Fatalf("ulog.Read(pyulog rewrite) error = %v", err)
 	}
-	wantInformation := []KeyValue{
-		{Name: "system_name", Type: TypeChar, ArrayLength: 7, Value: "sunfish"},
-		{Name: "build_id", Type: TypeUint32, Value: uint32(0x10203040)},
+	wantInformation := []ulog.KeyValue{
+		{Name: "system_name", Type: ulog.TypeChar, ArrayLength: 7, Value: "sunfish"},
+		{Name: "build_id", Type: ulog.TypeUint32, Value: uint32(0x10203040)},
 	}
 	if got := file.Information(); !reflect.DeepEqual(got, wantInformation) {
 		t.Errorf("rewritten information = %#v, want %#v", got, wantInformation)
 	}
-	wantParameters := []KeyValue{{Name: "gain", Type: TypeFloat32, Value: float32(1.25)}}
+	wantParameters := []ulog.KeyValue{{Name: "gain", Type: ulog.TypeFloat32, Value: float32(1.25)}}
 	if got := file.Parameters(); !reflect.DeepEqual(got, wantParameters) {
 		t.Errorf("rewritten parameters = %#v, want %#v", got, wantParameters)
 	}
-	wantLogs := []LogEntry{{Level: LogLevelInfo, Timestamp: 2500, Message: "ready"}}
+	wantLogs := []ulog.LogEntry{{Level: ulog.LogLevelInfo, Timestamp: 2500, Message: "ready"}}
 	if got := file.Logs(); !reflect.DeepEqual(got, wantLogs) {
 		t.Errorf("rewritten logs = %#v, want %#v", got, wantLogs)
 	}
-	wantDropouts := []Dropout{{Duration: 25 * time.Millisecond}}
+	wantDropouts := []ulog.Dropout{{Duration: 25 * time.Millisecond}}
 	if got := file.Dropouts(); !reflect.DeepEqual(got, wantDropouts) {
 		t.Errorf("rewritten dropouts = %#v, want %#v", got, wantDropouts)
 	}
@@ -156,10 +162,10 @@ func writePyULogFixture(t *testing.T, filename string) {
 	if err != nil {
 		t.Fatalf("create Go fixture: %v", err)
 	}
-	writer, err := NewWriter(destination, WithStartTimestamp(424))
+	writer, err := ulog.NewWriter(destination, ulog.WithStartTimestamp(424))
 	if err != nil {
 		_ = destination.Close()
-		t.Fatalf("NewWriter() error = %v", err)
+		t.Fatalf("ulog.NewWriter() error = %v", err)
 	}
 	if err := writer.WriteInformation("system_name", "sunfish"); err != nil {
 		t.Fatalf("WriteInformation(system_name) error = %v", err)
@@ -170,18 +176,18 @@ func writePyULogFixture(t *testing.T, filename string) {
 	if err := writer.WriteParameter("gain", float32(1.25)); err != nil {
 		t.Fatalf("WriteParameter(gain) error = %v", err)
 	}
-	first, err := Register[pyulogSample](writer)
+	first, err := ulog.Register[pyulogSample](writer)
 	if err != nil {
 		_ = destination.Close()
-		t.Fatalf("Register(first) error = %v", err)
+		t.Fatalf("ulog.Register(first) error = %v", err)
 	}
-	second, err := Register[pyulogSample](writer, WithMultiID(1))
+	second, err := ulog.Register[pyulogSample](writer, ulog.WithMultiID(1))
 	if err != nil {
 		_ = destination.Close()
-		t.Fatalf("Register(second) error = %v", err)
+		t.Fatalf("ulog.Register(second) error = %v", err)
 	}
 	values := []struct {
-		stream *Stream[pyulogSample]
+		stream *ulog.Stream[pyulogSample]
 		value  pyulogSample
 	}{
 		{first, pyulogSample{Timestamp: 1000, SignedValue: -123456, Value: -12.5, Vector: [3]float32{1, -2, 3.5}, Enabled: true}},
@@ -194,7 +200,7 @@ func writePyULogFixture(t *testing.T, filename string) {
 			t.Fatalf("Write() error = %v", err)
 		}
 	}
-	if err := writer.WriteLog(LogLevelInfo, 2500, "ready"); err != nil {
+	if err := writer.WriteLog(ulog.LogLevelInfo, 2500, "ready"); err != nil {
 		t.Fatalf("WriteLog() error = %v", err)
 	}
 	if err := writer.WriteDropout(25 * time.Millisecond); err != nil {
@@ -215,24 +221,24 @@ func interopArtifactDir(t *testing.T) string {
 	if directory == "" {
 		return t.TempDir()
 	}
-	if err := os.MkdirAll(directory, 0o750); err != nil {
+	if err := os.MkdirAll(directory, 0o750); err != nil { // #nosec G703 -- the caller explicitly selects the test artifact directory.
 		t.Fatalf("create interoperability artifact directory: %v", err)
 	}
 	return directory
 }
 
-func runPyULogOracle(t *testing.T, arguments ...string) []byte {
+func runPyULogOracle(t *testing.T, uvPath string, arguments ...string) []byte {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 	commandArguments := []string{
 		"run",
 		"--frozen",
-		"--project", "integration/pyulog",
-		"python", "integration/pyulog/oracle.py",
+		"--project", ".",
+		"python", "oracle.py",
 	}
 	commandArguments = append(commandArguments, arguments...)
-	command := exec.CommandContext(ctx, "uv", commandArguments...) // #nosec G204 -- arguments are controlled by this test.
+	command := exec.CommandContext(ctx, uvPath, commandArguments...) // #nosec G204 -- arguments are controlled by this test.
 	output, err := command.CombinedOutput()
 	if ctx.Err() != nil {
 		t.Fatalf("pyulog oracle timed out: %v", ctx.Err())
@@ -245,4 +251,53 @@ func runPyULogOracle(t *testing.T, arguments ...string) []byte {
 		t.Fatalf("run pyulog oracle: %v\n%s", err, output)
 	}
 	return output
+}
+
+// RunFixtureTest verifies that the Go reader accepts the committed pyulog fixture.
+func RunFixtureTest(t *testing.T) {
+	source, err := os.Open("testdata/pyulog-1.2.4.ulg") // #nosec G304 -- repository fixture path is constant.
+	if err != nil {
+		t.Fatalf("open pyulog fixture: %v", err)
+	}
+	defer func() {
+		if err := source.Close(); err != nil {
+			t.Errorf("close pyulog fixture: %v", err)
+		}
+	}()
+
+	file, err := ulog.Read(source)
+	if err != nil {
+		t.Fatalf("ulog.Read() error = %v", err)
+	}
+	if got, want := file.Header().Timestamp, uint64(424); got != want {
+		t.Errorf("header timestamp = %d, want %d", got, want)
+	}
+	wantInformation := []ulog.KeyValue{
+		{Name: "system_name", Type: ulog.TypeChar, ArrayLength: 7, Value: "sunfish"},
+		{Name: "build_id", Type: ulog.TypeUint32, Value: uint32(0x10203040)},
+	}
+	if got := file.Information(); !reflect.DeepEqual(got, wantInformation) {
+		t.Errorf("information = %#v, want %#v", got, wantInformation)
+	}
+	if got, want := file.Parameters(), []ulog.KeyValue{{Name: "gain", Type: ulog.TypeFloat32, Value: float32(1.25)}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("parameters = %#v, want %#v", got, want)
+	}
+	if got, want := file.Logs(), []ulog.LogEntry{{Level: ulog.LogLevelInfo, Timestamp: 2500, Message: "ready"}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("logs = %#v, want %#v", got, want)
+	}
+	if got, want := file.Dropouts(), []ulog.Dropout{{Duration: 25 * time.Millisecond}}; !reflect.DeepEqual(got, want) {
+		t.Errorf("dropouts = %#v, want %#v", got, want)
+	}
+
+	instance, err := file.Dataset("pyulog_sample", 1)
+	if err != nil {
+		t.Fatalf("Dataset(pyulog_sample, 1) error = %v", err)
+	}
+	column, ok := instance.Column("signed_value")
+	if !ok {
+		t.Fatal("signed_value column missing")
+	}
+	if got, want := column.Values(), []int32{-7}; !reflect.DeepEqual(got, want) {
+		t.Errorf("signed values = %#v, want %#v", got, want)
+	}
 }

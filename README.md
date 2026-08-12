@@ -93,6 +93,8 @@ values := timestamps.Values().([]uint64)
 For Arrow and Parquet, import the separate adapter package:
 
 ```go
+import "github.com/sunfish-robotics/ulog/pkg/columnar"
+
 record, err := columnar.ToArrow(dataset, nil)
 if err != nil {
     return err
@@ -115,7 +117,7 @@ Go writer → pyulog reader
 Go writer → pyulog rewrite → Go reader
 ```
 
-The pinned environment and fixture provenance live under [`integration/pyulog`](integration/pyulog) and [`testdata/interoperability`](testdata/interoperability).
+The pinned environment, test implementation, fixture, and provenance live together under [`tests`](tests).
 
 ## Current scope
 

@@ -6,10 +6,12 @@ compatibility tests. It is not a runtime dependency of the Go package.
 Run the suite from the repository root:
 
 ```console
-uv sync --frozen --project integration/pyulog
-ULOG_INTEROP_ARTIFACT_DIR=artifacts/pyulog \
-  go test -tags=pyulog -run PyULog -count=1 .
+uv sync --frozen --project tests
+ULOG_INTEROP_ARTIFACT_DIR="$PWD/artifacts/pyulog" \
+  go test -tags=pyulog -run PyULog -count=1 ./tests
 ```
+
+The tagged test is skipped when `uv` is not available on `PATH`.
 
 The tests retain generated and rewritten `.ulg` files in the configured
 artifact directory. Without that variable, Go uses a temporary directory.
