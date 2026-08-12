@@ -11,63 +11,6 @@ import (
 	"github.com/sunfish-robotics/ulog/pkg/wire"
 )
 
-func TestWriterAndFilePreserveAnalysisMetadata(t *testing.T) {
-	var source bytes.Buffer
-	writer, err := NewWriter(&source)
-	if err != nil {
-		t.Fatalf("NewWriter() error = %v", err)
-	}
-	if err := writer.WriteInformation("system_name", "sunfish"); err != nil {
-		t.Fatalf("WriteInformation(string) error = %v", err)
-	}
-	if err := writer.WriteInformation("build_id", uint32(0x10203040)); err != nil {
-		t.Fatalf("WriteInformation(uint32) error = %v", err)
-	}
-	if err := writer.WriteParameter("gain", float32(1.25)); err != nil {
-		t.Fatalf("WriteParameter() error = %v", err)
-	}
-	stream, err := Register[typedPointSample](writer)
-	if err != nil {
-		t.Fatalf("Register() error = %v", err)
-	}
-	if err := stream.Write(typedPointSample{X: 3, Y: 2.5}); err != nil {
-		t.Fatalf("Write() error = %v", err)
-	}
-	if err := writer.WriteLog(LogLevelInfo, 1234, "ready"); err != nil {
-		t.Fatalf("WriteLog() error = %v", err)
-	}
-	if err := writer.WriteDropout(25 * time.Millisecond); err != nil {
-		t.Fatalf("WriteDropout() error = %v", err)
-	}
-	if err := writer.Close(); err != nil {
-		t.Fatalf("Close() error = %v", err)
-	}
-
-	file, err := Read(bytes.NewReader(source.Bytes()))
-	if err != nil {
-		t.Fatalf("Read() error = %v", err)
-	}
-	wantInformation := []KeyValue{
-		{Name: "system_name", Type: TypeChar, ArrayLength: 7, Value: "sunfish"},
-		{Name: "build_id", Type: TypeUint32, Value: uint32(0x10203040)},
-	}
-	if got := file.Information(); !reflect.DeepEqual(got, wantInformation) {
-		t.Errorf("Information() = %#v, want %#v", got, wantInformation)
-	}
-	wantParameters := []KeyValue{{Name: "gain", Type: TypeFloat32, Value: float32(1.25)}}
-	if got := file.Parameters(); !reflect.DeepEqual(got, wantParameters) {
-		t.Errorf("Parameters() = %#v, want %#v", got, wantParameters)
-	}
-	wantLogs := []LogEntry{{Level: LogLevelInfo, Timestamp: 1234, Message: "ready"}}
-	if got := file.Logs(); !reflect.DeepEqual(got, wantLogs) {
-		t.Errorf("Logs() = %#v, want %#v", got, wantLogs)
-	}
-	wantDropouts := []Dropout{{Duration: 25 * time.Millisecond}}
-	if got := file.Dropouts(); !reflect.DeepEqual(got, wantDropouts) {
-		t.Errorf("Dropouts() = %#v, want %#v", got, wantDropouts)
-	}
-}
-
 func TestWriterRejectsInitialMetadataAfterDataStarts(t *testing.T) {
 	var source bytes.Buffer
 	writer, err := NewWriter(&source)
@@ -125,13 +68,6 @@ func TestReaderPreservesMultiInformationAndDefaultParameters(t *testing.T) {
 	if got := reader.DefaultParameters(); !reflect.DeepEqual(got, wantDefaults) {
 		t.Errorf("DefaultParameters() = %#v, want %#v", got, wantDefaults)
 	}
-	file, err := Read(bytes.NewReader(data.bytes()))
-	if err != nil {
-		t.Fatalf("Read() error = %v", err)
-	}
-	if got := file.DefaultParameters(); !reflect.DeepEqual(got, wantDefaults) {
-		t.Errorf("File.DefaultParameters() = %#v, want %#v", got, wantDefaults)
-	}
 }
 
 func TestReaderRejectsMalformedMultiInformationAndDefaultParameters(t *testing.T) {
@@ -175,17 +111,6 @@ func TestWriterAcceptsULogMetadataNames(t *testing.T) {
 	}
 	if err := writer.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
-	}
-
-	file, err := Read(bytes.NewReader(destination.Bytes()))
-	if err != nil {
-		t.Fatalf("Read() error = %v", err)
-	}
-	if got, want := file.Information()[0].Name, "vehicle-id"; got != want {
-		t.Errorf("information name = %q, want %q", got, want)
-	}
-	if got, want := file.Parameters()[0].Name, "gain/default"; got != want {
-		t.Errorf("parameter name = %q, want %q", got, want)
 	}
 }
 

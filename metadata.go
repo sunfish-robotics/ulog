@@ -8,16 +8,22 @@ import (
 	"time"
 )
 
-// KeyValue is a typed information or parameter entry. ArrayLength is zero for
-// a scalar. Character arrays are represented as strings.
+// KeyValue is a decoded information or parameter entry. [KeyValue.Value] has the
+// Go scalar or slice type selected by [KeyValue.Type]; character arrays are
+// strings. [KeyValue.ArrayLength] is zero for a scalar.
 type KeyValue struct {
-	Name        string
-	Type        Type
+	// Name is the case-sensitive information key or parameter name.
+	Name string
+	// Type is the primitive ULog type of Value.
+	Type Type
+	// ArrayLength is the fixed element count, or zero for a scalar.
 	ArrayLength int
-	Value       any
+	// Value is a Go scalar, primitive slice, or string matching Type and ArrayLength.
+	Value any
 }
 
-// DefaultParameterTypes identifies the scopes to which a default value applies.
+// DefaultParameterTypes identifies the independent configuration scopes to
+// which a [DefaultParameter] applies. A value may apply to both scopes.
 type DefaultParameterTypes uint8
 
 const (
@@ -27,9 +33,12 @@ const (
 	DefaultParameterCurrentConfiguration DefaultParameterTypes = 1 << 1
 )
 
-// DefaultParameter is a typed parameter default and its applicable scopes.
+// DefaultParameter is a parameter's default value for the scopes in
+// [DefaultParameter.Types]. If a log has no default for a given parameter and
+// scope, ULog defines its parameter value as the default.
 type DefaultParameter struct {
 	KeyValue
+	// Types contains one or more applicable default scopes.
 	Types DefaultParameterTypes
 }
 
@@ -55,17 +64,26 @@ const (
 	LogLevelDebug LogLevel = '7'
 )
 
-// LogEntry is one tagged or untagged ULog text message.
+// LogEntry is one printf-style ULog text message. [LogEntry.Timestamp] is in
+// microseconds. [LogEntry.Tag] identifies an application-defined source only
+// when [LogEntry.Tagged] is true.
 type LogEntry struct {
-	Level     LogLevel
+	// Level is the message severity.
+	Level LogLevel
+	// Timestamp is the message timestamp in microseconds.
 	Timestamp uint64
-	Message   string
-	Tag       uint16
-	Tagged    bool
+	// Message is the logged text.
+	Message string
+	// Tag is an application-defined source identifier when Tagged is true.
+	Tag uint16
+	// Tagged reports whether Tag was present on the wire.
+	Tagged bool
 }
 
-// Dropout describes a period during which logging messages were lost.
+// Dropout describes a period during which logging messages were lost, often
+// because the logging device could not keep up.
 type Dropout struct {
+	// Duration is the period for which logging messages were lost.
 	Duration time.Duration
 }
 
@@ -105,19 +123,57 @@ func decodeKeyValue(key string, data []byte) (KeyValue, error) {
 	}
 
 	size, _ := primitiveSize(field.Type)
-	count := field.ArrayLength
-	column := newColumn(field.Name, field.Type)
-	for i := range count {
+	values := make([]any, field.ArrayLength)
+	for i := range field.ArrayLength {
 		value, err := decodePrimitive(field.Type, data[i*size:(i+1)*size])
 		if err != nil {
 			return KeyValue{}, err
 		}
-		if err := column.append(value, true); err != nil {
-			return KeyValue{}, err
-		}
+		values[i] = value
 	}
-	entry.Value = column.Values()
-	return entry, nil
+	entry.Value, err = typedPrimitiveSlice(field.Type, values)
+	return entry, err
+}
+
+func typedPrimitiveSlice(typeID Type, values []any) (any, error) {
+	switch typeID {
+	case TypeInt8:
+		return collectPrimitiveValues[int8](values)
+	case TypeUint8, TypeChar:
+		return collectPrimitiveValues[uint8](values)
+	case TypeInt16:
+		return collectPrimitiveValues[int16](values)
+	case TypeUint16:
+		return collectPrimitiveValues[uint16](values)
+	case TypeInt32:
+		return collectPrimitiveValues[int32](values)
+	case TypeUint32:
+		return collectPrimitiveValues[uint32](values)
+	case TypeInt64:
+		return collectPrimitiveValues[int64](values)
+	case TypeUint64:
+		return collectPrimitiveValues[uint64](values)
+	case TypeFloat32:
+		return collectPrimitiveValues[float32](values)
+	case TypeFloat64:
+		return collectPrimitiveValues[float64](values)
+	case TypeBool:
+		return collectPrimitiveValues[bool](values)
+	default:
+		return nil, fmt.Errorf("unsupported primitive array type %q", typeID)
+	}
+}
+
+func collectPrimitiveValues[T any](values []any) ([]T, error) {
+	result := make([]T, len(values))
+	for i, value := range values {
+		typed, ok := value.(T)
+		if !ok {
+			return nil, fmt.Errorf("primitive value %d has type %T", i, value)
+		}
+		result[i] = typed
+	}
+	return result, nil
 }
 
 func encodeKeyValue(name string, value any) (string, []byte, error) {
@@ -150,7 +206,7 @@ func cloneKeyValues(values []KeyValue) []KeyValue {
 	cloned := make([]KeyValue, len(values))
 	for i, value := range values {
 		cloned[i] = value
-		cloned[i].Value = cloneColumnValues(value.Value)
+		cloned[i].Value = clonePrimitiveSlice(value.Value)
 	}
 	return cloned
 }
@@ -158,12 +214,12 @@ func cloneKeyValues(values []KeyValue) []KeyValue {
 func cloneDefaultParameters(values []DefaultParameter) []DefaultParameter {
 	cloned := append([]DefaultParameter(nil), values...)
 	for i := range cloned {
-		cloned[i].Value = cloneColumnValues(cloned[i].Value)
+		cloned[i].Value = clonePrimitiveSlice(cloned[i].Value)
 	}
 	return cloned
 }
 
-func cloneColumnValues(value any) any {
+func clonePrimitiveSlice(value any) any {
 	switch value := value.(type) {
 	case []int8:
 		return append([]int8(nil), value...)

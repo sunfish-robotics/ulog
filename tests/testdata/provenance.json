@@ -3,7 +3,7 @@
   "sha256": "709c43bb9e24db92db0418901a313ef550de92bcb0a689bcb1f3bb7587417f7e",
   "producer": "pyulog 1.2.4",
   "python": "3.14.*",
-  "environment": "integration/pyulog/uv.lock",
+  "environment": "tests/uv.lock",
   "method": "The tagged Go interoperability test generated a deterministic ULog, then pyulog loaded and rewrote it with ULog.write_ulog().",
-  "regenerate": "ULOG_INTEROP_ARTIFACT_DIR=artifacts/pyulog go test -tags=pyulog -run '^TestPyULogReadsGoAndGoReadsPyULog$' -count=1 . && cp artifacts/pyulog/pyulog-rewritten.ulg testdata/interoperability/pyulog-1.2.4.ulg"
+  "regenerate": "ULOG_INTEROP_ARTIFACT_DIR=\"$PWD/artifacts/pyulog\" go test -tags=pyulog -run '^TestPyULogReadsGoAndGoReadsPyULog$' -count=1 ./tests && cp artifacts/pyulog/pyulog-rewritten.ulg tests/testdata/pyulog-1.2.4.ulg"
 }

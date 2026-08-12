@@ -47,16 +47,23 @@ func (t Type) IsPrimitive() bool {
 	return ok
 }
 
-// Field describes one member of a [Format]. ArrayLength is zero for a scalar.
+// Field describes one member of a [Format]. A non-primitive [Field.Type] names
+// another format. [Field.ArrayLength] is zero for a scalar.
 type Field struct {
-	Name        string
-	Type        Type
+	// Name is the case-sensitive field name used on the wire.
+	Name string
+	// Type is a ULog primitive type or the name of another [Format].
+	Type Type
+	// ArrayLength is the fixed element count, or zero for a scalar.
 	ArrayLength int
 }
 
-// Format describes the schema carried by a ULog format-definition message.
+// Format is the self-described wire schema for one kind of data record. Fields
+// remain in wire order.
 type Format struct {
-	Name   string
+	// Name is the case-sensitive name used by subscriptions and nested fields.
+	Name string
+	// Fields contains at least one field in wire order.
 	Fields []Field
 }
 
@@ -66,7 +73,10 @@ var (
 	typePattern       = regexp.MustCompile(`^([A-Za-z0-9_/-]+)(?:\[([1-9][0-9]*)\])?$`)
 )
 
-// ParseFormat parses the payload of a ULog format-definition message.
+// ParseFormat parses one "name:type field;" definition. It validates the grammar,
+// names, duplicate fields, and primitive array sizes, but does not resolve nested
+// [Format] names, detect cycles, or require the timestamp field needed by a
+// subscription.
 func ParseFormat(definition string) (*Format, error) {
 	name, fieldsText, ok := strings.Cut(definition, ":")
 	if !ok {
@@ -147,7 +157,7 @@ func parseDeclaration(declaration string, namePattern *regexp.Regexp, nameKind s
 	return field, nil
 }
 
-// String returns the canonical ULog format definition.
+// String returns f in canonical "name:type field;" form.
 func (f Format) String() string {
 	var definition strings.Builder
 	definition.WriteString(f.Name)
