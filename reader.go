@@ -522,8 +522,9 @@ func (r Record) MultiID() uint8 { return r.multiID }
 // record's subscription.
 func (r Record) Format() Format { return cloneFormat(r.format) }
 
-// Fields returns flattened, non-padding scalar fields in wire order. The names
-// are accepted by [Record.Value].
+// Fields returns every flattened, non-padding scalar field in the selected
+// format, in wire order. A compatible older record may omit trailing fields;
+// [Record.Value] reports those fields as unavailable.
 func (r Record) Fields() []ScalarField {
 	fields := make([]ScalarField, 0, len(r.layout))
 	for _, field := range r.layout {

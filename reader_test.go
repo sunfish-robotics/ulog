@@ -118,6 +118,13 @@ func TestReaderAcceptsRecordsWithMissingTrailingFields(t *testing.T) {
 	if got, want := len(values), 2; got != want {
 		t.Fatalf("len(Values()) = %d, want %d", got, want)
 	}
+	fields := reader.Record().Fields()
+	if got, want := len(fields), 3; got != want {
+		t.Fatalf("len(Fields()) = %d, want %d", got, want)
+	}
+	if got, want := fields[2].Name, "new_value"; got != want {
+		t.Errorf("Fields()[2].Name = %q, want %q", got, want)
+	}
 	if _, err := reader.Record().Value("new_value"); err == nil {
 		t.Fatal("Value(new_value) succeeded for an omitted trailing field")
 	}
