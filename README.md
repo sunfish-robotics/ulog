@@ -14,7 +14,7 @@ go get github.com/sunfish-robotics/ulog
 
 The [package documentation][go-reference] contains executable examples for the common workflows:
 
-- stream dynamically typed records with bounded memory;
+- stream dynamically typed records without materialising the complete log;
 - decode selected formats into typed Go structs;
 - write records from typed Go structs;
 - load a file into column-oriented datasets with [`pkg/dataset`][dataset-reference]; and
