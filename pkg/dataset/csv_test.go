@@ -36,6 +36,21 @@ func TestDatasetWriteCSVWritesColumnsInWireOrder(t *testing.T) {
 	}
 }
 
+func TestDatasetWriteCSVWritesCharacterArraysAsStrings(t *testing.T) {
+	instance := readTextDataset(t, "vehicle,\"zoda\"\n")
+
+	var destination bytes.Buffer
+	if err := instance.WriteCSV(&destination); err != nil {
+		t.Fatalf("WriteCSV() error = %v", err)
+	}
+
+	want := "timestamp,labels.name,labels.payload[0],labels.payload[1]\n" +
+		"42,\"vehicle,\"\"zoda\"\"\n\",1,2\n"
+	if got := destination.String(); got != want {
+		t.Errorf("WriteCSV() = %q, want %q", got, want)
+	}
+}
+
 func TestDatasetWriteCSVWritesNullsAsEmptyFields(t *testing.T) {
 	fixture := newFixture(t, 0)
 	fixture.message(t, wire.MessageTypeFormat, wire.FormatMessage{
@@ -112,6 +127,57 @@ func readCSVDataset(t *testing.T) *dataset.Dataset {
 		t.Fatalf("Read() error = %v", err)
 	}
 	instance, err := file.Dataset("csv_sample", 0)
+	if err != nil {
+		t.Fatalf("Dataset() error = %v", err)
+	}
+	return instance
+}
+
+func readTextDataset(t *testing.T, name string) *dataset.Dataset {
+	t.Helper()
+	const nameWidth = 24
+	if len(name) > nameWidth {
+		t.Fatalf("test name has %d bytes, maximum is %d", len(name), nameWidth)
+	}
+	var source bytes.Buffer
+	writer, err := ulog.NewWriter(&source)
+	if err != nil {
+		t.Fatalf("NewWriter() error = %v", err)
+	}
+	if err := writer.Define(ulog.Format{
+		Name: "labels",
+		Fields: []ulog.Field{
+			{Name: "name", Type: ulog.TypeChar, ArrayLength: nameWidth},
+			{Name: "payload", Type: ulog.TypeUint8, ArrayLength: 2},
+		},
+	}); err != nil {
+		t.Fatalf("Define() error = %v", err)
+	}
+	stream, err := writer.RegisterFormat(ulog.Format{
+		Name: "text_sample",
+		Fields: []ulog.Field{
+			{Name: "timestamp", Type: ulog.TypeUint64},
+			{Name: "labels", Type: "labels"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterFormat() error = %v", err)
+	}
+	payload := binary.LittleEndian.AppendUint64(nil, 42)
+	payload = append(payload, name...)
+	payload = append(payload, make([]byte, nameWidth-len(name))...)
+	payload = append(payload, 1, 2)
+	if err := stream.Write(payload); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+	file, err := dataset.Read(bytes.NewReader(source.Bytes()))
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	instance, err := file.Dataset("text_sample", 0)
 	if err != nil {
 		t.Fatalf("Dataset() error = %v", err)
 	}

@@ -10,7 +10,10 @@
 // [FormatsFor], [FormatFor], [Register], and [Decode] adapt named Go structs to
 // that dynamic model. Exported fields become lower_snake_case by default; a
 // “ulog” struct tag can rename a field or exclude it with “-”. The adapter
-// supports ULog primitive types, fixed-size arrays, and nested named structs.
+// supports ULog primitive types, fixed-size arrays, and nested named structs. A
+// string field requires its wire width in a tag such as ulog:"name,char[80]".
+// Dynamic records expose character arrays as strings with trailing NUL padding
+// removed. Scalar characters and uint8 arrays remain byte-valued.
 //
 // Use [Reader] when records can be processed as a stream. Package [dataset]
 // loads a complete file into typed columns, and package [columnar] converts

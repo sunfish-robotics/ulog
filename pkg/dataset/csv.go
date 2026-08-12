@@ -77,6 +77,8 @@ func formatCSVValue(value any) (string, error) {
 		return strconv.FormatFloat(value, 'g', -1, 64), nil
 	case bool:
 		return strconv.FormatBool(value), nil
+	case string:
+		return value, nil
 	default:
 		return "", fmt.Errorf("unsupported value type %T", value)
 	}

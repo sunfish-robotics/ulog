@@ -73,6 +73,109 @@ func TestReadBuildsTypedDatasets(t *testing.T) {
 	}
 }
 
+func TestReadStoresCharacterArraysAsStrings(t *testing.T) {
+	var source bytes.Buffer
+	writer, err := ulog.NewWriter(&source)
+	if err != nil {
+		t.Fatalf("NewWriter() error = %v", err)
+	}
+	stream, err := writer.RegisterFormat(ulog.Format{
+		Name: "text_sample",
+		Fields: []ulog.Field{
+			{Name: "timestamp", Type: ulog.TypeUint64},
+			{Name: "name", Type: ulog.TypeChar, ArrayLength: 8},
+			{Name: "payload", Type: ulog.TypeUint8, ArrayLength: 2},
+			{Name: "code", Type: ulog.TypeChar},
+		},
+	})
+	if err != nil {
+		t.Fatalf("RegisterFormat() error = %v", err)
+	}
+	payload := binary.LittleEndian.AppendUint64(nil, 42)
+	payload = append(payload, 'h', 'i', 0, 'x', 0, 0, 0, 0)
+	payload = append(payload, 1, 2, 'Z')
+	if err := stream.Write(payload); err != nil {
+		t.Fatalf("Write() error = %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("Close() error = %v", err)
+	}
+
+	file, err := dataset.Read(bytes.NewReader(source.Bytes()))
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	instance, err := file.Dataset("text_sample", 0)
+	if err != nil {
+		t.Fatalf("Dataset() error = %v", err)
+	}
+	if _, ok := instance.Column("name[0]"); ok {
+		t.Fatal("Column(name[0]) exists, want one name string column")
+	}
+	name, ok := instance.Column("name")
+	if !ok {
+		t.Fatal("Column(name) not found")
+	}
+	if got, want := name.Values(), []string{"hi\x00x"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("name.Values() = %#v, want %#v", got, want)
+	}
+	values := name.Values().([]string)
+	values[0] = "changed"
+	if got, valid := name.Value(0); !valid || got != "hi\x00x" {
+		t.Errorf("name.Value(0) after caller mutation = %#v, %t, want %q, true", got, valid, "hi\x00x")
+	}
+	if got, want := name.ArrayLength(), 8; got != want {
+		t.Errorf("name.ArrayLength() = %d, want %d", got, want)
+	}
+	if got, want := instance.Columns()[2].Name(), "payload[0]"; got != want {
+		t.Errorf("Columns()[2].Name() = %q, want %q", got, want)
+	}
+	code, ok := instance.Column("code")
+	if !ok {
+		t.Fatal("Column(code) not found")
+	}
+	if got, want := code.Values(), []uint8{'Z'}; !reflect.DeepEqual(got, want) {
+		t.Errorf("code.Values() = %#v, want %#v", got, want)
+	}
+}
+
+func TestReadMarksMissingTrailingCharacterArrayNull(t *testing.T) {
+	fixture := newFixture(t, 0)
+	fixture.message(t, wire.MessageTypeFormat, wire.FormatMessage{
+		Format: "text_versioned:uint64_t timestamp;char[8] name;",
+	})
+	fixture.message(t, wire.MessageTypeSubscription, wire.SubscriptionMessage{MessageID: 1, MessageName: "text_versioned"})
+	complete := binary.LittleEndian.AppendUint64(nil, 1)
+	complete = append(complete, 'z', 'o', 'd', 'a', 0, 0, 0, 0)
+	fixture.message(t, wire.MessageTypeData, wire.DataMessage{MessageID: 1, Data: complete})
+	fixture.message(t, wire.MessageTypeData, wire.DataMessage{
+		MessageID: 1,
+		Data:      binary.LittleEndian.AppendUint64(nil, 2),
+	})
+
+	file, err := dataset.Read(bytes.NewReader(fixture.bytes()))
+	if err != nil {
+		t.Fatalf("Read() error = %v", err)
+	}
+	instance, err := file.Dataset("text_versioned", 0)
+	if err != nil {
+		t.Fatalf("Dataset() error = %v", err)
+	}
+	name, ok := instance.Column("name")
+	if !ok {
+		t.Fatal("Column(name) not found")
+	}
+	if got, want := name.Values(), []string{"zoda", ""}; !reflect.DeepEqual(got, want) {
+		t.Errorf("name.Values() = %#v, want %#v", got, want)
+	}
+	if _, valid := name.Value(0); !valid {
+		t.Error("name.Value(0) is null, want valid")
+	}
+	if value, valid := name.Value(1); valid || value != nil {
+		t.Errorf("name.Value(1) = %#v, %t, want nil, false", value, valid)
+	}
+}
+
 func TestReadMarksMissingTrailingValuesNull(t *testing.T) {
 	fixture := newFixture(t, 0)
 	fixture.message(t, wire.MessageTypeFormat, wire.FormatMessage{

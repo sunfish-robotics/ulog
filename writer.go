@@ -605,6 +605,15 @@ func encodeTypedValue(schema *typedSchema, value reflect.Value) ([]byte, error) 
 				field = field.Index(step.array)
 			}
 		}
+		if leaf.typeID == TypeChar && leaf.arrayLength > 0 {
+			text := field.String()
+			if len(text) > leaf.arrayLength {
+				return nil, fmt.Errorf("encode field %q: string has %d bytes, maximum is %d", leaf.path, len(text), leaf.arrayLength)
+			}
+			payload = append(payload, text...)
+			payload = append(payload, make([]byte, leaf.arrayLength-len(text))...)
+			continue
+		}
 		var err error
 		payload, err = binary.Append(payload, binary.LittleEndian, field.Interface())
 		if err != nil {
