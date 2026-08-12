@@ -14,6 +14,7 @@ type File struct {
 	datasets    []*Dataset
 	byKey       map[datasetKey]*Dataset
 	information []ulog.KeyValue
+	multiInfo   []ulog.MultiInformationGroup
 	parameters  []ulog.KeyValue
 	defaults    []ulog.DefaultParameter
 	logs        []ulog.LogEntry
@@ -54,6 +55,7 @@ func Read(source io.Reader) (*File, error) {
 		return nil, err
 	}
 	file.information = reader.Information()
+	file.multiInfo = reader.MultiInformation()
 	file.parameters = reader.Parameters()
 	file.defaults = reader.DefaultParameters()
 	file.logs = reader.Logs()
@@ -76,6 +78,15 @@ func (f *File) Information() []ulog.KeyValue {
 		return nil
 	}
 	return cloneKeyValues(f.information)
+}
+
+// MultiInformation returns independent copies of grouped multi-information
+// values in the order each group started.
+func (f *File) MultiInformation() []ulog.MultiInformationGroup {
+	if f == nil {
+		return nil
+	}
+	return cloneMultiInformation(f.multiInfo)
 }
 
 // Parameters returns independent copies of the initial parameter values and
@@ -408,6 +419,18 @@ func cloneKeyValues(values []ulog.KeyValue) []ulog.KeyValue {
 	cloned := append([]ulog.KeyValue(nil), values...)
 	for i := range cloned {
 		cloned[i].Value = clonePrimitiveSlice(cloned[i].Value)
+	}
+	return cloned
+}
+
+func cloneMultiInformation(groups []ulog.MultiInformationGroup) []ulog.MultiInformationGroup {
+	cloned := make([]ulog.MultiInformationGroup, len(groups))
+	for i, group := range groups {
+		cloned[i] = group
+		cloned[i].Values = append([]ulog.MultiInformationValue(nil), group.Values...)
+		for j := range cloned[i].Values {
+			cloned[i].Values[j].Value = clonePrimitiveSlice(cloned[i].Values[j].Value)
+		}
 	}
 	return cloned
 }
