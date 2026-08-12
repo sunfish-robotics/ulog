@@ -13,6 +13,7 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 
 	"github.com/sunfish-robotics/ulog"
+	"github.com/sunfish-robotics/ulog/pkg/dataset"
 )
 
 type sample struct {
@@ -97,7 +98,7 @@ func TestWriteParquetProducesReadableTable(t *testing.T) {
 	}
 }
 
-func sampleDataset(t *testing.T) *ulog.Dataset {
+func sampleDataset(t *testing.T) *dataset.Dataset {
 	t.Helper()
 	var source bytes.Buffer
 	writer, err := ulog.NewWriter(&source)
@@ -119,7 +120,7 @@ func sampleDataset(t *testing.T) *ulog.Dataset {
 	if err := writer.Close(); err != nil {
 		t.Fatalf("Close() error = %v", err)
 	}
-	file, err := ulog.Read(bytes.NewReader(source.Bytes()))
+	file, err := dataset.Read(bytes.NewReader(source.Bytes()))
 	if err != nil {
 		t.Fatalf("Read() error = %v", err)
 	}

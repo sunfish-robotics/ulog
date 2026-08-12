@@ -468,6 +468,12 @@ type FieldValue struct {
 	Value any
 }
 
+// ScalarField describes one flattened, non-padding scalar in a [Record].
+type ScalarField struct {
+	Name string
+	Type Type
+}
+
 // Record is one format-resolved ULog data message.
 type Record struct {
 	messageID uint16
@@ -488,6 +494,18 @@ func (r Record) MultiID() uint8 { return r.multiID }
 
 // Format returns an independent copy of the record's dynamic schema.
 func (r Record) Format() Format { return cloneFormat(r.format) }
+
+// Fields returns flattened, non-padding scalar fields in wire order.
+func (r Record) Fields() []ScalarField {
+	fields := make([]ScalarField, 0, len(r.layout))
+	for _, field := range r.layout {
+		if field.hidden {
+			continue
+		}
+		fields = append(fields, ScalarField{Name: field.name, Type: field.typeID})
+	}
+	return fields
+}
 
 // Bytes returns an independent copy of the format-defined payload.
 func (r Record) Bytes() []byte { return bytes.Clone(r.data) }

@@ -105,19 +105,57 @@ func decodeKeyValue(key string, data []byte) (KeyValue, error) {
 	}
 
 	size, _ := primitiveSize(field.Type)
-	count := field.ArrayLength
-	column := newColumn(field.Name, field.Type)
-	for i := range count {
+	values := make([]any, field.ArrayLength)
+	for i := range field.ArrayLength {
 		value, err := decodePrimitive(field.Type, data[i*size:(i+1)*size])
 		if err != nil {
 			return KeyValue{}, err
 		}
-		if err := column.append(value, true); err != nil {
-			return KeyValue{}, err
-		}
+		values[i] = value
 	}
-	entry.Value = column.Values()
-	return entry, nil
+	entry.Value, err = typedPrimitiveSlice(field.Type, values)
+	return entry, err
+}
+
+func typedPrimitiveSlice(typeID Type, values []any) (any, error) {
+	switch typeID {
+	case TypeInt8:
+		return collectPrimitiveValues[int8](values)
+	case TypeUint8, TypeChar:
+		return collectPrimitiveValues[uint8](values)
+	case TypeInt16:
+		return collectPrimitiveValues[int16](values)
+	case TypeUint16:
+		return collectPrimitiveValues[uint16](values)
+	case TypeInt32:
+		return collectPrimitiveValues[int32](values)
+	case TypeUint32:
+		return collectPrimitiveValues[uint32](values)
+	case TypeInt64:
+		return collectPrimitiveValues[int64](values)
+	case TypeUint64:
+		return collectPrimitiveValues[uint64](values)
+	case TypeFloat32:
+		return collectPrimitiveValues[float32](values)
+	case TypeFloat64:
+		return collectPrimitiveValues[float64](values)
+	case TypeBool:
+		return collectPrimitiveValues[bool](values)
+	default:
+		return nil, fmt.Errorf("unsupported primitive array type %q", typeID)
+	}
+}
+
+func collectPrimitiveValues[T any](values []any) ([]T, error) {
+	result := make([]T, len(values))
+	for i, value := range values {
+		typed, ok := value.(T)
+		if !ok {
+			return nil, fmt.Errorf("primitive value %d has type %T", i, value)
+		}
+		result[i] = typed
+	}
+	return result, nil
 }
 
 func encodeKeyValue(name string, value any) (string, []byte, error) {
@@ -150,7 +188,7 @@ func cloneKeyValues(values []KeyValue) []KeyValue {
 	cloned := make([]KeyValue, len(values))
 	for i, value := range values {
 		cloned[i] = value
-		cloned[i].Value = cloneColumnValues(value.Value)
+		cloned[i].Value = clonePrimitiveSlice(value.Value)
 	}
 	return cloned
 }
@@ -158,12 +196,12 @@ func cloneKeyValues(values []KeyValue) []KeyValue {
 func cloneDefaultParameters(values []DefaultParameter) []DefaultParameter {
 	cloned := append([]DefaultParameter(nil), values...)
 	for i := range cloned {
-		cloned[i].Value = cloneColumnValues(cloned[i].Value)
+		cloned[i].Value = clonePrimitiveSlice(cloned[i].Value)
 	}
 	return cloned
 }
 
-func cloneColumnValues(value any) any {
+func clonePrimitiveSlice(value any) any {
 	switch value := value.(type) {
 	case []int8:
 		return append([]int8(nil), value...)

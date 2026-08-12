@@ -6,6 +6,7 @@ import (
 
 	"github.com/sunfish-robotics/ulog"
 	"github.com/sunfish-robotics/ulog/pkg/columnar"
+	"github.com/sunfish-robotics/ulog/pkg/dataset"
 )
 
 type sample struct {
@@ -40,7 +41,7 @@ func ExampleWriteParquet() {
 	// PAR1 ... PAR1
 }
 
-func exampleDataset() *ulog.Dataset {
+func exampleDataset() *dataset.Dataset {
 	var source bytes.Buffer
 	writer, err := ulog.NewWriter(&source)
 	if err != nil {
@@ -61,7 +62,7 @@ func exampleDataset() *ulog.Dataset {
 	if err := writer.Close(); err != nil {
 		panic(err)
 	}
-	file, err := ulog.Read(bytes.NewReader(source.Bytes()))
+	file, err := dataset.Read(bytes.NewReader(source.Bytes()))
 	if err != nil {
 		panic(err)
 	}

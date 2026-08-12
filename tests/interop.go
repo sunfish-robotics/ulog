@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/sunfish-robotics/ulog"
+	"github.com/sunfish-robotics/ulog/pkg/dataset"
 )
 
 type pyulogSample struct {
@@ -120,9 +121,9 @@ func RunPyULogTest(t *testing.T) {
 			t.Errorf("close pyulog rewrite: %v", err)
 		}
 	}()
-	file, err := ulog.Read(rewritten)
+	file, err := dataset.Read(rewritten)
 	if err != nil {
-		t.Fatalf("ulog.Read(pyulog rewrite) error = %v", err)
+		t.Fatalf("dataset.Read(pyulog rewrite) error = %v", err)
 	}
 	wantInformation := []ulog.KeyValue{
 		{Name: "system_name", Type: ulog.TypeChar, ArrayLength: 7, Value: "sunfish"},
@@ -265,9 +266,9 @@ func RunFixtureTest(t *testing.T) {
 		}
 	}()
 
-	file, err := ulog.Read(source)
+	file, err := dataset.Read(source)
 	if err != nil {
-		t.Fatalf("ulog.Read() error = %v", err)
+		t.Fatalf("dataset.Read() error = %v", err)
 	}
 	if got, want := file.Header().Timestamp, uint64(424); got != want {
 		t.Errorf("header timestamp = %d, want %d", got, want)

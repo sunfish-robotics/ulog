@@ -14,19 +14,20 @@ import (
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 
 	"github.com/sunfish-robotics/ulog"
+	"github.com/sunfish-robotics/ulog/pkg/dataset"
 )
 
 // ToArrow converts dataset into one Arrow record batch. The caller must release
 // the returned record. A nil allocator uses [memory.DefaultAllocator].
-func ToArrow(dataset *ulog.Dataset, allocator memory.Allocator) (arrowlib.RecordBatch, error) {
-	if dataset == nil {
+func ToArrow(source *dataset.Dataset, allocator memory.Allocator) (arrowlib.RecordBatch, error) {
+	if source == nil {
 		return nil, errors.New("nil ULog dataset")
 	}
 	if allocator == nil {
 		allocator = memory.DefaultAllocator
 	}
 
-	columns := dataset.Columns()
+	columns := source.Columns()
 	fields := make([]arrowlib.Field, len(columns))
 	for i, column := range columns {
 		dataType, err := arrowType(column.Type())
@@ -36,9 +37,9 @@ func ToArrow(dataset *ulog.Dataset, allocator memory.Allocator) (arrowlib.Record
 		fields[i] = arrowlib.Field{Name: column.Name(), Type: dataType, Nullable: true}
 	}
 	metadata := arrowlib.MetadataFrom(map[string]string{
-		"ulog.format":            dataset.Name(),
-		"ulog.format_definition": dataset.Format().String(),
-		"ulog.multi_id":          strconv.FormatUint(uint64(dataset.MultiID()), 10),
+		"ulog.format":            source.Name(),
+		"ulog.format_definition": source.Format().String(),
+		"ulog.multi_id":          strconv.FormatUint(uint64(source.MultiID()), 10),
 	})
 	schema := arrowlib.NewSchema(fields, &metadata)
 	builder := array.NewRecordBuilder(allocator, schema)
@@ -57,11 +58,11 @@ func ToArrow(dataset *ulog.Dataset, allocator memory.Allocator) (arrowlib.Record
 
 // WriteParquet converts dataset to Arrow and writes a Parquet file to
 // destination. It does not close destination.
-func WriteParquet(destination io.Writer, dataset *ulog.Dataset) error {
+func WriteParquet(destination io.Writer, source *dataset.Dataset) error {
 	if destination == nil {
 		return errors.New("nil Parquet destination")
 	}
-	record, err := ToArrow(dataset, memory.DefaultAllocator)
+	record, err := ToArrow(source, memory.DefaultAllocator)
 	if err != nil {
 		return err
 	}
@@ -69,7 +70,7 @@ func WriteParquet(destination io.Writer, dataset *ulog.Dataset) error {
 
 	table := array.NewTableFromRecords(record.Schema(), []arrowlib.RecordBatch{record})
 	defer table.Release()
-	chunkSize := int64(dataset.Len())
+	chunkSize := int64(source.Len())
 	if chunkSize < 1 {
 		chunkSize = 1
 	}
@@ -114,7 +115,7 @@ func arrowType(typeID ulog.Type) (arrowlib.DataType, error) {
 	}
 }
 
-func appendColumn(builder array.Builder, column ulog.Column, valid []bool) error {
+func appendColumn(builder array.Builder, column dataset.Column, valid []bool) error {
 	switch column.Type() {
 	case ulog.TypeInt8:
 		builder, ok := builder.(*array.Int8Builder)
@@ -188,6 +189,6 @@ func appendColumn(builder array.Builder, column ulog.Column, valid []bool) error
 	return nil
 }
 
-func builderTypeError(column ulog.Column, builder array.Builder) error {
+func builderTypeError(column dataset.Column, builder array.Builder) error {
 	return fmt.Errorf("column %q has unexpected Arrow builder %T", column.Name(), builder)
 }

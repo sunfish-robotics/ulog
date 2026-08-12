@@ -59,49 +59,21 @@ func ExampleRegister() {
 		panic(err)
 	}
 
-	file, err := ulog.Read(bytes.NewReader(destination.Bytes()))
+	reader, err := ulog.NewReader(bytes.NewReader(destination.Bytes()))
 	if err != nil {
 		panic(err)
 	}
-	dataset, err := file.Dataset("sensor_sample", 0)
-	if err != nil {
+	var samples int
+	for reader.Next() {
+		samples++
+	}
+	if err := reader.Err(); err != nil {
 		panic(err)
 	}
-	pressure, ok := dataset.Column("pressure")
-	if !ok {
-		panic("pressure column is missing")
-	}
-	fmt.Println(pressure.Values())
+	fmt.Println(samples)
 
 	// Output:
-	// [101.25]
-}
-
-func ExampleRead() {
-	source, err := os.Open("flight.ulg")
-	if err != nil {
-		panic(err)
-	}
-	defer func() {
-		if err := source.Close(); err != nil {
-			panic(err)
-		}
-	}()
-
-	file, err := ulog.Read(source)
-	if err != nil {
-		panic(err)
-	}
-	dataset, err := file.Dataset("vehicle_attitude", 0)
-	if err != nil {
-		panic(err)
-	}
-	timestamps, ok := dataset.Column("timestamp")
-	if !ok {
-		panic("timestamp column is missing")
-	}
-	values := timestamps.Values().([]uint64)
-	fmt.Printf("%d attitude samples, from %d µs\n", dataset.Len(), values[0])
+	// 1
 }
 
 func ExampleDecode() {

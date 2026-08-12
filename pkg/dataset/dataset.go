@@ -1,21 +1,23 @@
-package ulog
+package dataset
 
 import (
 	"errors"
 	"fmt"
 	"io"
+
+	"github.com/sunfish-robotics/ulog"
 )
 
 // File is an eager, column-oriented view of a ULog stream.
 type File struct {
-	header      Header
+	header      ulog.Header
 	datasets    []*Dataset
 	byKey       map[datasetKey]*Dataset
-	information []KeyValue
-	parameters  []KeyValue
-	defaults    []DefaultParameter
-	logs        []LogEntry
-	dropouts    []Dropout
+	information []ulog.KeyValue
+	parameters  []ulog.KeyValue
+	defaults    []ulog.DefaultParameter
+	logs        []ulog.LogEntry
+	dropouts    []ulog.Dropout
 }
 
 type datasetKey struct {
@@ -25,7 +27,7 @@ type datasetKey struct {
 
 // Read consumes source and groups its data records into datasets.
 func Read(source io.Reader) (*File, error) {
-	reader, err := NewReader(source)
+	reader, err := ulog.NewReader(source)
 	if err != nil {
 		return nil, err
 	}
@@ -58,15 +60,15 @@ func Read(source io.Reader) (*File, error) {
 }
 
 // Header returns the file header.
-func (f *File) Header() Header {
+func (f *File) Header() ulog.Header {
 	if f == nil {
-		return Header{}
+		return ulog.Header{}
 	}
 	return f.header
 }
 
 // Information returns typed information entries in file order.
-func (f *File) Information() []KeyValue {
+func (f *File) Information() []ulog.KeyValue {
 	if f == nil {
 		return nil
 	}
@@ -74,7 +76,7 @@ func (f *File) Information() []KeyValue {
 }
 
 // Parameters returns parameter entries in file order, including changes.
-func (f *File) Parameters() []KeyValue {
+func (f *File) Parameters() []ulog.KeyValue {
 	if f == nil {
 		return nil
 	}
@@ -82,7 +84,7 @@ func (f *File) Parameters() []KeyValue {
 }
 
 // DefaultParameters returns default parameter entries in file order.
-func (f *File) DefaultParameters() []DefaultParameter {
+func (f *File) DefaultParameters() []ulog.DefaultParameter {
 	if f == nil {
 		return nil
 	}
@@ -90,19 +92,19 @@ func (f *File) DefaultParameters() []DefaultParameter {
 }
 
 // Logs returns tagged and untagged text messages in file order.
-func (f *File) Logs() []LogEntry {
+func (f *File) Logs() []ulog.LogEntry {
 	if f == nil {
 		return nil
 	}
-	return append([]LogEntry(nil), f.logs...)
+	return append([]ulog.LogEntry(nil), f.logs...)
 }
 
 // Dropouts returns logging dropouts in file order.
-func (f *File) Dropouts() []Dropout {
+func (f *File) Dropouts() []ulog.Dropout {
 	if f == nil {
 		return nil
 	}
-	return append([]Dropout(nil), f.dropouts...)
+	return append([]ulog.Dropout(nil), f.dropouts...)
 }
 
 // Datasets returns datasets in order of their first data record.
@@ -129,30 +131,27 @@ func (f *File) Dataset(name string, multiID uint8) (*Dataset, error) {
 type Dataset struct {
 	name        string
 	multiID     uint8
-	format      Format
+	format      ulog.Format
 	columns     []Column
 	columnIndex map[string]int
 	length      int
 }
 
-func newDataset(record Record) *Dataset {
+func newDataset(record ulog.Record) *Dataset {
 	dataset := &Dataset{
 		name:        record.Name(),
 		multiID:     record.MultiID(),
 		format:      record.Format(),
 		columnIndex: make(map[string]int),
 	}
-	for _, field := range record.layout {
-		if field.hidden {
-			continue
-		}
-		dataset.columnIndex[field.name] = len(dataset.columns)
-		dataset.columns = append(dataset.columns, newColumn(field.name, field.typeID))
+	for _, field := range record.Fields() {
+		dataset.columnIndex[field.Name] = len(dataset.columns)
+		dataset.columns = append(dataset.columns, newColumn(field.Name, field.Type))
 	}
 	return dataset
 }
 
-func (d *Dataset) appendRecord(record Record) error {
+func (d *Dataset) appendRecord(record ulog.Record) error {
 	values, err := record.Values()
 	if err != nil {
 		return err
@@ -192,9 +191,9 @@ func (d *Dataset) MultiID() uint8 {
 }
 
 // Format returns an independent copy of the dataset schema.
-func (d *Dataset) Format() Format {
+func (d *Dataset) Format() ulog.Format {
 	if d == nil {
-		return Format{}
+		return ulog.Format{}
 	}
 	return cloneFormat(d.format)
 }
@@ -229,38 +228,38 @@ func (d *Dataset) Column(name string) (Column, bool) {
 
 // Column is a nullable, primitive-typed dataset column. Values returns one of
 // []int8, []uint8, []int16, []uint16, []int32, []uint32, []int64, []uint64,
-// []float32, []float64, or []bool according to Type.
+// []float32, []float64, or []bool according to ulog.Type.
 type Column struct {
 	name   string
-	typeID Type
+	typeID ulog.Type
 	values any
 	valid  []bool
 }
 
-func newColumn(name string, typeID Type) Column {
+func newColumn(name string, typeID ulog.Type) Column {
 	column := Column{name: name, typeID: typeID}
 	switch typeID {
-	case TypeInt8:
+	case ulog.TypeInt8:
 		column.values = []int8(nil)
-	case TypeUint8, TypeChar:
+	case ulog.TypeUint8, ulog.TypeChar:
 		column.values = []uint8(nil)
-	case TypeInt16:
+	case ulog.TypeInt16:
 		column.values = []int16(nil)
-	case TypeUint16:
+	case ulog.TypeUint16:
 		column.values = []uint16(nil)
-	case TypeInt32:
+	case ulog.TypeInt32:
 		column.values = []int32(nil)
-	case TypeUint32:
+	case ulog.TypeUint32:
 		column.values = []uint32(nil)
-	case TypeInt64:
+	case ulog.TypeInt64:
 		column.values = []int64(nil)
-	case TypeUint64:
+	case ulog.TypeUint64:
 		column.values = []uint64(nil)
-	case TypeFloat32:
+	case ulog.TypeFloat32:
 		column.values = []float32(nil)
-	case TypeFloat64:
+	case ulog.TypeFloat64:
 		column.values = []float64(nil)
-	case TypeBool:
+	case ulog.TypeBool:
 		column.values = []bool(nil)
 	}
 	return column
@@ -269,27 +268,27 @@ func newColumn(name string, typeID Type) Column {
 func (c *Column) append(value any, valid bool) error {
 	c.valid = append(c.valid, valid)
 	switch c.typeID {
-	case TypeInt8:
+	case ulog.TypeInt8:
 		return appendColumnValue(c, value, valid, func(values []int8, value int8) any { return append(values, value) })
-	case TypeUint8, TypeChar:
+	case ulog.TypeUint8, ulog.TypeChar:
 		return appendColumnValue(c, value, valid, func(values []uint8, value uint8) any { return append(values, value) })
-	case TypeInt16:
+	case ulog.TypeInt16:
 		return appendColumnValue(c, value, valid, func(values []int16, value int16) any { return append(values, value) })
-	case TypeUint16:
+	case ulog.TypeUint16:
 		return appendColumnValue(c, value, valid, func(values []uint16, value uint16) any { return append(values, value) })
-	case TypeInt32:
+	case ulog.TypeInt32:
 		return appendColumnValue(c, value, valid, func(values []int32, value int32) any { return append(values, value) })
-	case TypeUint32:
+	case ulog.TypeUint32:
 		return appendColumnValue(c, value, valid, func(values []uint32, value uint32) any { return append(values, value) })
-	case TypeInt64:
+	case ulog.TypeInt64:
 		return appendColumnValue(c, value, valid, func(values []int64, value int64) any { return append(values, value) })
-	case TypeUint64:
+	case ulog.TypeUint64:
 		return appendColumnValue(c, value, valid, func(values []uint64, value uint64) any { return append(values, value) })
-	case TypeFloat32:
+	case ulog.TypeFloat32:
 		return appendColumnValue(c, value, valid, func(values []float32, value float32) any { return append(values, value) })
-	case TypeFloat64:
+	case ulog.TypeFloat64:
 		return appendColumnValue(c, value, valid, func(values []float64, value float64) any { return append(values, value) })
-	case TypeBool:
+	case ulog.TypeBool:
 		return appendColumnValue(c, value, valid, func(values []bool, value bool) any { return append(values, value) })
 	default:
 		return fmt.Errorf("unsupported column type %q", c.typeID)
@@ -317,7 +316,7 @@ func appendColumnValue[T any](column *Column, value any, valid bool, appendValue
 func (c Column) Name() string { return c.name }
 
 // Type returns the ULog primitive type stored by the column.
-func (c Column) Type() Type { return c.typeID }
+func (c Column) Type() ulog.Type { return c.typeID }
 
 // Len returns the number of rows in the column.
 func (c Column) Len() int { return len(c.valid) }
@@ -384,5 +383,55 @@ func (c Column) Value(index int) (any, bool) {
 		return values[index], true
 	default:
 		return nil, false
+	}
+}
+
+func cloneFormat(format ulog.Format) ulog.Format {
+	format.Fields = append([]ulog.Field(nil), format.Fields...)
+	return format
+}
+
+func cloneKeyValues(values []ulog.KeyValue) []ulog.KeyValue {
+	cloned := append([]ulog.KeyValue(nil), values...)
+	for i := range cloned {
+		cloned[i].Value = clonePrimitiveSlice(cloned[i].Value)
+	}
+	return cloned
+}
+
+func cloneDefaultParameters(values []ulog.DefaultParameter) []ulog.DefaultParameter {
+	cloned := append([]ulog.DefaultParameter(nil), values...)
+	for i := range cloned {
+		cloned[i].Value = clonePrimitiveSlice(cloned[i].Value)
+	}
+	return cloned
+}
+
+func clonePrimitiveSlice(value any) any {
+	switch value := value.(type) {
+	case []int8:
+		return append([]int8(nil), value...)
+	case []uint8:
+		return append([]uint8(nil), value...)
+	case []int16:
+		return append([]int16(nil), value...)
+	case []uint16:
+		return append([]uint16(nil), value...)
+	case []int32:
+		return append([]int32(nil), value...)
+	case []uint32:
+		return append([]uint32(nil), value...)
+	case []int64:
+		return append([]int64(nil), value...)
+	case []uint64:
+		return append([]uint64(nil), value...)
+	case []float32:
+		return append([]float32(nil), value...)
+	case []float64:
+		return append([]float64(nil), value...)
+	case []bool:
+		return append([]bool(nil), value...)
+	default:
+		return value
 	}
 }

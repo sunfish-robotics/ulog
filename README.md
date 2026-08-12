@@ -17,12 +17,12 @@ The [package documentation][go-reference] contains executable examples for the c
 - stream dynamically typed records with bounded memory;
 - decode selected formats into typed Go structs;
 - write records from typed Go structs;
-- load a file into column-oriented datasets for analysis; and
+- load a file into column-oriented datasets with [`pkg/dataset`][dataset-reference]; and
 - convert datasets to Apache Arrow or Parquet with [`pkg/columnar`][columnar-reference].
 
 ULog `F` format messages remain authoritative. `FormatFor[T]`, `Decode[T]`, and `Register[T]` provide optional typed adapters without requiring a matching Go struct to read a file. Arrays and nested formats use flattened paths such as `q[0]` and `position.x`.
 
-The root `ulog` package uses only the Go standard library. Importing `pkg/columnar` adds Apache Arrow.
+The root `ulog` and `pkg/dataset` packages use only the Go standard library. Importing `pkg/columnar` adds Apache Arrow.
 
 ## Compatibility
 
@@ -53,6 +53,7 @@ This project is released under the [Apache License, Version 2.0](LICENSE).
 [ci]: https://github.com/sunfish-robotics/ulog/actions/workflows/ci.yml
 [ci-badge]: https://github.com/sunfish-robotics/ulog/actions/workflows/ci.yml/badge.svg
 [go-reference]: https://pkg.go.dev/github.com/sunfish-robotics/ulog
+[dataset-reference]: https://pkg.go.dev/github.com/sunfish-robotics/ulog/pkg/dataset
 [columnar-reference]: https://pkg.go.dev/github.com/sunfish-robotics/ulog/pkg/columnar
 [license]: LICENSE
 [license-badge]: https://img.shields.io/badge/license-Apache--2.0-blue.svg
