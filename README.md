@@ -17,7 +17,7 @@ The [package documentation][go-reference] contains executable examples for the c
 - stream dynamically typed records without materialising the complete log;
 - decode selected formats into typed Go structs;
 - write records from typed Go structs;
-- load a file into column-oriented datasets with [`pkg/dataset`][dataset-reference]; and
+- load a file into column-oriented datasets and export individual datasets as CSV with [`pkg/dataset`][dataset-reference]; and
 - convert datasets to Apache Arrow or Parquet with [`pkg/columnar`][columnar-reference].
 
 ULog `F` format messages remain authoritative. `FormatFor[T]`, `Decode[T]`, and `Register[T]` provide optional typed adapters without requiring a matching Go struct to read a file. Arrays and nested formats use flattened paths such as `q[0]` and `position.x`.
@@ -42,7 +42,7 @@ The pinned environment, test implementation, fixture, and provenance live togeth
 - streaming and eager reads
 - typed and dynamic writing
 - information and multi-information, parameters and defaults, logging, and dropouts
-- Arrow record batches and Parquet output
+- CSV, Arrow record batches, and Parquet output
 
 Appended data sections are rejected rather than silently misread. Multi-information, default-parameter, and tagged-log writing are available at the lower-level `pkg/wire` boundary but do not yet have root-package writer conveniences.
 
