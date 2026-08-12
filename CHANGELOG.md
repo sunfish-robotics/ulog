@@ -1,5 +1,21 @@
 # Changelog
 
+## [0.2.0](https://github.com/sunfish-robotics/ulog/compare/v0.1.0...v0.2.0) (2026-08-12)
+
+
+### Features
+
+* **dataset:** add CSV export ([6284307](https://github.com/sunfish-robotics/ulog/commit/62843079fd6f987796a48e022b3198ffc552be73))
+* **dataset:** add CSV export ([560c80b](https://github.com/sunfish-robotics/ulog/commit/560c80b7ead1d4b1270f058b27adc24c53ab3e39))
+* treat character arrays as strings ([6ce8428](https://github.com/sunfish-robotics/ulog/commit/6ce842851d6f9dc05684b05029a5e63b806f1a5c))
+* treat character arrays as strings ([9d9d9c0](https://github.com/sunfish-robotics/ulog/commit/9d9d9c0229784cd10328b5e92306dc5d0bdb12d7))
+
+
+### Bug Fixes
+
+* preserve multi-information groups ([7b33437](https://github.com/sunfish-robotics/ulog/commit/7b33437e01a3818fd89b432e92191e8cf01f7bb7))
+* preserve multi-information groups ([e6f2071](https://github.com/sunfish-robotics/ulog/commit/e6f207138854b6626bab8af0c46e48a3e2627081))
+
 ## 0.1.0 (2026-08-12)
 
 
