@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"testing"
 
+	arrowlib "github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	parquetfile "github.com/apache/arrow-go/v18/parquet/file"
@@ -112,10 +113,10 @@ func TestNestedArrayCharacterFieldsReachArrowAndParquet(t *testing.T) {
 		t.Fatalf("ReadTable() error = %v", err)
 	}
 	defer table.Release()
-	if got, want := table.Column(1).Data().Chunk(0).(*array.String).Value(0), "zōda"; got != want {
+	if got, want := parquetColumn(t, table, "labels[0].name").(*array.String).Value(0), "zōda"; got != want {
 		t.Errorf("Parquet labels[0].name = %q, want %q", got, want)
 	}
-	if got, want := table.Column(2).Data().Chunk(0).(*array.String).Value(0), "hi\x00x"; got != want {
+	if got, want := parquetColumn(t, table, "labels[1].name").(*array.String).Value(0), "hi\x00x"; got != want {
 		t.Errorf("Parquet labels[1].name = %q, want %q", got, want)
 	}
 }
@@ -162,9 +163,9 @@ func TestWriteParquetPreservesCharacterArrayStrings(t *testing.T) {
 		t.Fatalf("ReadTable() error = %v", err)
 	}
 	defer table.Release()
-	name, ok := table.Column(1).Data().Chunk(0).(*array.String)
+	name, ok := parquetColumn(t, table, "name").(*array.String)
 	if !ok {
-		t.Fatalf("name column type = %T, want *array.String", table.Column(1).Data().Chunk(0))
+		t.Fatalf("name column type = %T, want *array.String", parquetColumn(t, table, "name"))
 	}
 	if got, want := name.Value(0), "vehicle-zoda"; got != want {
 		t.Errorf("name value = %q, want %q", got, want)
@@ -172,6 +173,20 @@ func TestWriteParquetPreservesCharacterArrayStrings(t *testing.T) {
 	if !name.IsNull(1) {
 		t.Error("name row 1 is valid, want null")
 	}
+}
+
+func parquetColumn(t *testing.T, table arrowlib.Table, name string) arrowlib.Array {
+	t.Helper()
+	indices := table.Schema().FieldIndices(name)
+	if len(indices) != 1 {
+		t.Fatalf("Parquet field %q indices = %v, want one", name, indices)
+	}
+	column := table.Column(indices[0]).Data()
+	chunks := column.Chunks()
+	if len(chunks) != 1 {
+		t.Fatalf("Parquet field %q chunks = %d, want one", name, len(chunks))
+	}
+	return chunks[0]
 }
 
 func characterArrayDataset(t *testing.T, name string) *dataset.Dataset {

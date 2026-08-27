@@ -7,15 +7,12 @@ package columnar
 import (
 	"errors"
 	"fmt"
-	"io"
 	"strconv"
 	"unicode/utf8"
 
 	arrowlib "github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
-	"github.com/apache/arrow-go/v18/parquet"
-	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 
 	"github.com/sunfish-robotics/ulog"
 	"github.com/sunfish-robotics/ulog/pkg/dataset"
@@ -59,36 +56,6 @@ func ToArrow(source *dataset.Dataset, allocator memory.Allocator) (arrowlib.Reco
 		}
 	}
 	return builder.NewRecordBatch(), nil
-}
-
-// WriteParquet writes source as one Parquet table using the same schema mapping
-// as [ToArrow]. It does not close destination.
-func WriteParquet(destination io.Writer, source *dataset.Dataset) error {
-	if destination == nil {
-		return errors.New("nil Parquet destination")
-	}
-	record, err := ToArrow(source, memory.DefaultAllocator)
-	if err != nil {
-		return err
-	}
-	defer record.Release()
-
-	table := array.NewTableFromRecords(record.Schema(), []arrowlib.RecordBatch{record})
-	defer table.Release()
-	chunkSize := int64(source.Len())
-	if chunkSize < 1 {
-		chunkSize = 1
-	}
-	if err := pqarrow.WriteTable(
-		table,
-		destination,
-		chunkSize,
-		parquet.NewWriterProperties(),
-		pqarrow.DefaultWriterProps(),
-	); err != nil {
-		return fmt.Errorf("write Parquet table: %w", err)
-	}
-	return nil
 }
 
 func arrowType(typeID ulog.Type, arrayLength int) (arrowlib.DataType, error) {
