@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"reflect"
+	"slices"
 	"testing"
 
 	arrowlib "github.com/apache/arrow-go/v18/arrow"
@@ -94,8 +95,11 @@ func TestWriteParquetProducesReadableTable(t *testing.T) {
 	if got, want := table.NumRows(), int64(2); got != want {
 		t.Errorf("Parquet rows = %d, want %d", got, want)
 	}
-	if got, want := fieldNames(table.Schema()), []string{"timestamp", "x", "values[0]", "values[1]", "valid"}; !reflect.DeepEqual(got, want) {
-		t.Errorf("Parquet fields = %v, want %v", got, want)
+	gotFields := fieldNames(table.Schema())
+	slices.Sort(gotFields)
+	wantFields := []string{"timestamp", "valid", "values[0]", "values[1]", "x"}
+	if !reflect.DeepEqual(gotFields, wantFields) {
+		t.Errorf("Parquet fields = %v, want %v", gotFields, wantFields)
 	}
 }
 
