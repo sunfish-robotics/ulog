@@ -20,12 +20,18 @@ import (
 type Compression string
 
 const (
+	// CompressionUncompressed disables Parquet compression.
 	CompressionUncompressed Compression = "uncompressed"
-	CompressionSnappy       Compression = "snappy"
-	CompressionGzip         Compression = "gzip"
-	CompressionBrotli       Compression = "brotli"
-	CompressionZstd         Compression = "zstd"
-	CompressionLZ4Raw       Compression = "lz4_raw"
+	// CompressionSnappy selects Snappy compression.
+	CompressionSnappy Compression = "snappy"
+	// CompressionGzip selects Gzip compression.
+	CompressionGzip Compression = "gzip"
+	// CompressionBrotli selects Brotli compression.
+	CompressionBrotli Compression = "brotli"
+	// CompressionZstd selects Zstandard compression.
+	CompressionZstd Compression = "zstd"
+	// CompressionLZ4Raw selects raw LZ4 compression.
+	CompressionLZ4Raw Compression = "lz4_raw"
 )
 
 // ParquetOption configures [WriteParquet].
