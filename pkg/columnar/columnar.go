@@ -15,6 +15,7 @@ import (
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
 	"github.com/apache/arrow-go/v18/parquet"
+	parquetcompress "github.com/apache/arrow-go/v18/parquet/compress"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 
 	"github.com/sunfish-robotics/ulog"
@@ -61,11 +62,81 @@ func ToArrow(source *dataset.Dataset, allocator memory.Allocator) (arrowlib.Reco
 	return builder.NewRecordBatch(), nil
 }
 
+// Compression identifies a Parquet compression codec. Compression applies to
+// every column; per-column policies are deliberately outside this package's
+// current export boundary.
+type Compression string
+
+const (
+	CompressionUncompressed Compression = "uncompressed"
+	CompressionSnappy       Compression = "snappy"
+	CompressionGzip         Compression = "gzip"
+	CompressionBrotli       Compression = "brotli"
+	CompressionZstd         Compression = "zstd"
+	CompressionLZ4Raw       Compression = "lz4_raw"
+)
+
+// ParquetOption configures [WriteParquet].
+type ParquetOption func(*parquetConfig) error
+
+type parquetConfig struct {
+	compression parquetcompress.Compression
+}
+
+// WithCompression configures one compression codec for every Parquet column.
+func WithCompression(compression Compression) ParquetOption {
+	return func(config *parquetConfig) error {
+		codec, err := parquetCompression(compression)
+		if err != nil {
+			return err
+		}
+		config.compression = codec
+		return nil
+	}
+}
+
+func parquetCompression(compression Compression) (parquetcompress.Compression, error) {
+	switch compression {
+	case CompressionUncompressed:
+		return parquetcompress.Codecs.Uncompressed, nil
+	case CompressionSnappy:
+		return parquetcompress.Codecs.Snappy, nil
+	case CompressionGzip:
+		return parquetcompress.Codecs.Gzip, nil
+	case CompressionBrotli:
+		return parquetcompress.Codecs.Brotli, nil
+	case CompressionZstd:
+		return parquetcompress.Codecs.Zstd, nil
+	case CompressionLZ4Raw:
+		return parquetcompress.Codecs.Lz4Raw, nil
+	default:
+		return parquetcompress.Codecs.Uncompressed, fmt.Errorf("unsupported Parquet compression %q", compression)
+	}
+}
+
+func parquetConfigFrom(options []ParquetOption) (parquetConfig, error) {
+	config := parquetConfig{compression: parquetcompress.Codecs.Uncompressed}
+	for _, option := range options {
+		if option == nil {
+			return parquetConfig{}, errors.New("nil Parquet option")
+		}
+		if err := option(&config); err != nil {
+			return parquetConfig{}, err
+		}
+	}
+	return config, nil
+}
+
 // WriteParquet writes source as one Parquet table using the same schema mapping
-// as [ToArrow]. It does not close destination.
-func WriteParquet(destination io.Writer, source *dataset.Dataset) error {
+// as [ToArrow]. Options configure compression and other Parquet encoding
+// behaviour. It does not close destination.
+func WriteParquet(destination io.Writer, source *dataset.Dataset, options ...ParquetOption) error {
 	if destination == nil {
 		return errors.New("nil Parquet destination")
+	}
+	config, err := parquetConfigFrom(options)
+	if err != nil {
+		return fmt.Errorf("configure Parquet writer: %w", err)
 	}
 	record, err := ToArrow(source, memory.DefaultAllocator)
 	if err != nil {
@@ -83,7 +154,7 @@ func WriteParquet(destination io.Writer, source *dataset.Dataset) error {
 		table,
 		destination,
 		chunkSize,
-		parquet.NewWriterProperties(),
+		parquet.NewWriterProperties(parquet.WithCompression(config.compression)),
 		pqarrow.DefaultWriterProps(),
 	); err != nil {
 		return fmt.Errorf("write Parquet table: %w", err)

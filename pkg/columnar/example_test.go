@@ -31,7 +31,11 @@ func ExampleToArrow() {
 func ExampleWriteParquet() {
 	dataset := exampleDataset()
 	var destination bytes.Buffer
-	if err := columnar.WriteParquet(&destination, dataset); err != nil {
+	if err := columnar.WriteParquet(
+		&destination,
+		dataset,
+		columnar.WithCompression(columnar.CompressionGzip),
+	); err != nil {
 		panic(err)
 	}
 

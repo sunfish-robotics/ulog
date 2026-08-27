@@ -9,6 +9,7 @@ import (
 	arrowlib "github.com/apache/arrow-go/v18/arrow"
 	"github.com/apache/arrow-go/v18/arrow/array"
 	"github.com/apache/arrow-go/v18/arrow/memory"
+	"github.com/apache/arrow-go/v18/parquet/compress"
 	parquetfile "github.com/apache/arrow-go/v18/parquet/file"
 	"github.com/apache/arrow-go/v18/parquet/pqarrow"
 
@@ -95,6 +96,78 @@ func TestWriteParquetProducesReadableTable(t *testing.T) {
 	}
 	if got, want := fieldNames(table.Schema()), []string{"timestamp", "x", "values[0]", "values[1]", "valid"}; !reflect.DeepEqual(got, want) {
 		t.Errorf("Parquet fields = %v, want %v", got, want)
+	}
+}
+
+func TestWriteParquetAppliesCompression(t *testing.T) {
+	tests := []struct {
+		compression Compression
+		want        compress.Compression
+	}{
+		{CompressionUncompressed, compress.Codecs.Uncompressed},
+		{CompressionSnappy, compress.Codecs.Snappy},
+		{CompressionGzip, compress.Codecs.Gzip},
+		{CompressionBrotli, compress.Codecs.Brotli},
+		{CompressionZstd, compress.Codecs.Zstd},
+		{CompressionLZ4Raw, compress.Codecs.Lz4Raw},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.compression), func(t *testing.T) {
+			dataset := sampleDataset(t)
+			var destination bytes.Buffer
+			if err := WriteParquet(
+				&destination,
+				dataset,
+				WithCompression(tt.compression),
+			); err != nil {
+				t.Fatalf("WriteParquet() error = %v", err)
+			}
+
+			reader, err := parquetfile.NewParquetReader(bytes.NewReader(destination.Bytes()))
+			if err != nil {
+				t.Fatalf("NewParquetReader() error = %v", err)
+			}
+			defer func() {
+				if err := reader.Close(); err != nil {
+					t.Errorf("reader.Close() error = %v", err)
+				}
+			}()
+			metadata := reader.MetaData()
+			for rowGroupIndex := range metadata.RowGroups {
+				rowGroup := metadata.RowGroup(rowGroupIndex)
+				for columnIndex := range rowGroup.NumColumns() {
+					column, err := rowGroup.ColumnChunk(columnIndex)
+					if err != nil {
+						t.Fatalf("ColumnChunk(%d) error = %v", columnIndex, err)
+					}
+					if got := column.Compression(); got != tt.want {
+						t.Errorf("column %d compression = %v, want %v", columnIndex, got, tt.want)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestWriteParquetRejectsInvalidOptions(t *testing.T) {
+	tests := []struct {
+		name   string
+		option ParquetOption
+	}{
+		{"nil", nil},
+		{"unsupported compression", WithCompression(Compression("rot13"))},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var destination bytes.Buffer
+			err := WriteParquet(&destination, sampleDataset(t), tt.option)
+			if err == nil {
+				t.Fatal("WriteParquet() succeeded with invalid options")
+			}
+			if destination.Len() != 0 {
+				t.Fatalf("WriteParquet() wrote %d bytes before rejecting invalid options", destination.Len())
+			}
+		})
 	}
 }
 
