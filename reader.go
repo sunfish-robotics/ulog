@@ -26,19 +26,21 @@ type Header struct {
 // advances, it also collects information, multi-information groups, parameters,
 // logs, and dropouts.
 type Reader struct {
-	source        io.Reader
-	header        Header
-	formats       map[string]Format
-	subscriptions map[uint16]subscription
-	information   []KeyValue
-	multiInfo     []MultiInformationGroup
-	multiInfoLast map[string]int
-	parameters    []KeyValue
-	defaults      []DefaultParameter
-	logs          []LogEntry
-	dropouts      []Dropout
-	record        Record
-	err           error
+	source          io.Reader
+	offset          uint64
+	appendedOffsets []uint64
+	header          Header
+	formats         map[string]Format
+	subscriptions   map[uint16]subscription
+	information     []KeyValue
+	multiInfo       []MultiInformationGroup
+	multiInfoLast   map[string]int
+	parameters      []KeyValue
+	defaults        []DefaultParameter
+	logs            []LogEntry
+	dropouts        []Dropout
+	record          Record
+	err             error
 }
 
 type subscription struct {
@@ -79,6 +81,7 @@ func NewReader(source io.Reader) (*Reader, error) {
 	}
 	return &Reader{
 		source: source,
+		offset: uint64(len(data)),
 		header: Header{
 			Version:   fileHeader.Version,
 			Timestamp: fileHeader.Timestamp,
@@ -106,7 +109,7 @@ func (r *Reader) Next() bool {
 	}
 
 	for {
-		messageType, payload, err := readMessage(r.source)
+		messageType, payload, err := r.readMessage()
 		if errors.Is(err, io.EOF) {
 			return false
 		}
@@ -197,22 +200,65 @@ func (r *Reader) Dropouts() []Dropout {
 	return append([]Dropout(nil), r.dropouts...)
 }
 
-func readMessage(source io.Reader) (wire.MessageType, []byte, error) {
-	var headerBytes [3]byte
-	n, err := io.ReadFull(source, headerBytes[:])
-	if errors.Is(err, io.EOF) && n == 0 {
-		return 0, nil, io.EOF
-	}
-	if err != nil {
-		return 0, nil, fmt.Errorf("read ULog message header: %w", err)
-	}
+func (r *Reader) readMessage() (wire.MessageType, []byte, error) {
+	for {
+		if r.atAppendedSection() {
+			r.appendedOffsets = r.appendedOffsets[1:]
+		}
 
-	size := binary.LittleEndian.Uint16(headerBytes[:2])
-	payload := make([]byte, int(size))
-	if _, err := io.ReadFull(source, payload); err != nil {
-		return 0, nil, fmt.Errorf("read ULog %q message payload: %w", headerBytes[2], err)
+		var headerBytes [3]byte
+		if r.crossesAppendedOffset(uint64(len(headerBytes))) {
+			if err := r.skipToAppendedSection(); err != nil {
+				return 0, nil, err
+			}
+			continue
+		}
+		n, err := r.readFull(headerBytes[:])
+		if errors.Is(err, io.EOF) && n == 0 {
+			return 0, nil, io.EOF
+		}
+		if err != nil {
+			return 0, nil, fmt.Errorf("read ULog message header: %w", err)
+		}
+
+		size := binary.LittleEndian.Uint16(headerBytes[:2])
+		if r.crossesAppendedOffset(uint64(size)) {
+			if err := r.skipToAppendedSection(); err != nil {
+				return 0, nil, err
+			}
+			continue
+		}
+		payload := make([]byte, int(size))
+		if _, err := r.readFull(payload); err != nil {
+			return 0, nil, fmt.Errorf("read ULog %q message payload: %w", headerBytes[2], err)
+		}
+		return wire.MessageType(headerBytes[2]), payload, nil
 	}
-	return wire.MessageType(headerBytes[2]), payload, nil
+}
+
+func (r *Reader) readFull(data []byte) (int, error) {
+	n, err := io.ReadFull(r.source, data)
+	r.offset += uint64(n) // #nosec G115 -- io.ReadFull returns a non-negative byte count.
+	return n, err
+}
+
+func (r *Reader) atAppendedSection() bool {
+	return len(r.appendedOffsets) > 0 && r.offset == r.appendedOffsets[0]
+}
+
+func (r *Reader) crossesAppendedOffset(size uint64) bool {
+	return len(r.appendedOffsets) > 0 && size > r.appendedOffsets[0]-r.offset
+}
+
+func (r *Reader) skipToAppendedSection() error {
+	remaining := r.appendedOffsets[0] - r.offset
+	// crossesAppendedOffset limits remaining to a three-byte header or uint16 payload.
+	if _, err := io.CopyN(io.Discard, r.source, int64(remaining)); err != nil { // #nosec G115 -- bounded above.
+		return fmt.Errorf("skip interrupted ULog message at appended offset %d: %w", r.appendedOffsets[0], err)
+	}
+	r.offset += remaining
+	r.appendedOffsets = r.appendedOffsets[1:]
+	return nil
 }
 
 func (r *Reader) consume(messageType wire.MessageType, payload []byte) (Record, bool, error) {
@@ -231,7 +277,20 @@ func (r *Reader) consume(messageType wire.MessageType, payload []byte) (Record, 
 			return Record{}, false, fmt.Errorf("unsupported ULog incompatibility flags %#x", unknown)
 		}
 		if flags.IncompatibilityFlags&wire.IncompatibilityFlagDataAppended != 0 {
-			return Record{}, false, errors.New("ULog appended data sections are not supported")
+			previous := r.offset
+			for _, offset := range flags.AppendedOffsets {
+				if offset == 0 {
+					break
+				}
+				if offset <= previous {
+					return Record{}, false, fmt.Errorf("invalid ULog appended offset %d after offset %d", offset, previous)
+				}
+				r.appendedOffsets = append(r.appendedOffsets, offset)
+				previous = offset
+			}
+			if len(r.appendedOffsets) == 0 {
+				return Record{}, false, errors.New("ULog data-appended flag has no appended offsets")
+			}
 		}
 	case wire.MessageTypeFormat:
 		var message wire.FormatMessage
