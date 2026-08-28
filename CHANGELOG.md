@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.3.0](https://github.com/sunfish-robotics/ulog/compare/v0.2.0...v0.3.0) (2026-08-27)
+
+
+### Features
+
+* **columnar:** add configurable parquet-go output ([cd74fe8](https://github.com/sunfish-robotics/ulog/commit/cd74fe8590f4fa939f2c3829f251b33f36c8dc5b))
+* **columnar:** add Parquet compression options ([d879720](https://github.com/sunfish-robotics/ulog/commit/d8797206d70e6e211267486b9947dc85942e56e1))
+
 ## [0.2.0](https://github.com/sunfish-robotics/ulog/compare/v0.1.0...v0.2.0) (2026-08-12)
 
 
