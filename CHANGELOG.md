@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.4.0](https://github.com/sunfish-robotics/ulog/compare/v0.3.0...v0.4.0) (2026-08-28)
+
+
+### Features
+
+* read appended data sections ([14206a2](https://github.com/sunfish-robotics/ulog/commit/14206a2770ccb788ec445cf28ba25be379414721))
+* read appended data sections ([515729d](https://github.com/sunfish-robotics/ulog/commit/515729d14d77a086e98a23e4809cde67f0992113))
+
 ## [0.3.0](https://github.com/sunfish-robotics/ulog/compare/v0.2.0...v0.3.0) (2026-08-27)
 
 
