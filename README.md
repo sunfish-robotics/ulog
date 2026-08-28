@@ -42,9 +42,10 @@ The pinned environment, test implementation, fixture, and provenance live togeth
 - streaming and eager reads
 - typed and dynamic writing
 - information and multi-information, parameters and defaults, logging, and dropouts
+- reading appended data sections, including sections following an interrupted message
 - CSV, Arrow record batches, and Parquet output
 
-Appended data sections are rejected rather than silently misread. Multi-information, default-parameter, and tagged-log writing are available at the lower-level `pkg/wire` boundary but do not yet have root-package writer conveniences.
+Multi-information, default-parameter, and tagged-log writing are available at the lower-level `pkg/wire` boundary but do not yet have root-package writer conveniences.
 
 ## License
 

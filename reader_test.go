@@ -222,6 +222,121 @@ func TestReaderAcceptsFutureVersionAndExtendedFlagBits(t *testing.T) {
 	}
 }
 
+func TestReaderContinuesAtAppendedDataAfterInterruptedMessage(t *testing.T) {
+	data := newULogFixture(t, 0)
+	data.message(t, wire.MessageTypeFormat, wire.FormatMessage{Format: "sample:uint64_t timestamp;uint16_t value;"})
+	data.message(t, wire.MessageTypeSubscription, wire.SubscriptionMessage{MessageID: 1, MessageName: "sample"})
+
+	data.rawMessageHeader(t, wire.MessageTypeData, 12)
+	data.data = append(data.data, 1, 0, 0xff)
+	appendedOffset := uint64(len(data.data))
+
+	data.message(t, wire.MessageTypeData, wire.DataMessage{MessageID: 1, Data: samplePayload(99, 42)})
+	data.setAppendedOffsets(t, appendedOffset)
+
+	reader, err := NewReader(bytes.NewReader(data.bytes()))
+	if err != nil {
+		t.Fatalf("NewReader() error = %v", err)
+	}
+	if !reader.Next() {
+		t.Fatalf("Next() = false, error = %v", reader.Err())
+	}
+
+	assertRecordValue(t, reader.Record(), 42)
+	if reader.Next() {
+		t.Fatal("second Next() = true, want false")
+	}
+	if err := reader.Err(); err != nil {
+		t.Fatalf("Err() = %v", err)
+	}
+}
+
+func TestReaderContinuesAcrossMultipleAppendedSections(t *testing.T) {
+	data := newULogFixture(t, 0)
+	data.message(t, wire.MessageTypeFormat, wire.FormatMessage{Format: "sample:uint64_t timestamp;uint16_t value;"})
+	data.message(t, wire.MessageTypeSubscription, wire.SubscriptionMessage{MessageID: 1, MessageName: "sample"})
+
+	data.rawMessageHeader(t, wire.MessageTypeData, 12)
+	data.data = append(data.data, 1, 0)
+	firstOffset := uint64(len(data.data))
+	data.message(t, wire.MessageTypeData, wire.DataMessage{MessageID: 1, Data: samplePayload(10, 1)})
+
+	data.data = append(data.data, 0xff, 0xff)
+	secondOffset := uint64(len(data.data))
+	data.message(t, wire.MessageTypeData, wire.DataMessage{MessageID: 1, Data: samplePayload(20, 2)})
+	data.setAppendedOffsets(t, firstOffset, secondOffset)
+
+	reader, err := NewReader(bytes.NewReader(data.bytes()))
+	if err != nil {
+		t.Fatalf("NewReader() error = %v", err)
+	}
+	for i, want := range []uint16{1, 2} {
+		if !reader.Next() {
+			t.Fatalf("Next() for record %d = false, error = %v", i, reader.Err())
+		}
+		assertRecordValue(t, reader.Record(), want)
+	}
+	if reader.Next() {
+		t.Fatal("third Next() = true, want false")
+	}
+	if err := reader.Err(); err != nil {
+		t.Fatalf("Err() = %v", err)
+	}
+}
+
+func TestReaderRejectsInvalidAppendedOffsets(t *testing.T) {
+	tests := map[string]struct {
+		offsets     []uint64
+		wantMessage string
+	}{
+		"missing": {
+			wantMessage: "has no appended offsets",
+		},
+		"before flag bits": {
+			offsets:     []uint64{1},
+			wantMessage: "invalid ULog appended offset 1",
+		},
+		"not increasing": {
+			offsets:     []uint64{100, 100},
+			wantMessage: "invalid ULog appended offset 100 after offset 100",
+		},
+	}
+
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			data := newULogFixture(t, 0)
+			data.setAppendedOffsets(t, tt.offsets...)
+
+			reader, err := NewReader(bytes.NewReader(data.bytes()))
+			if err != nil {
+				t.Fatalf("NewReader() error = %v", err)
+			}
+			if reader.Next() {
+				t.Fatal("Next() = true, want false")
+			}
+			if err := reader.Err(); err == nil || !strings.Contains(err.Error(), tt.wantMessage) {
+				t.Fatalf("Err() = %v, want error containing %q", err, tt.wantMessage)
+			}
+		})
+	}
+}
+
+func samplePayload(timestamp uint64, value uint16) []byte {
+	payload := binary.LittleEndian.AppendUint64(nil, timestamp)
+	return binary.LittleEndian.AppendUint16(payload, value)
+}
+
+func assertRecordValue(t *testing.T, record Record, want uint16) {
+	t.Helper()
+	value, err := record.Value("value")
+	if err != nil {
+		t.Fatalf("Value(value) error = %v", err)
+	}
+	if value != want {
+		t.Errorf("Value(value) = %#v, want %#v", value, want)
+	}
+}
+
 type ulogFixture struct {
 	data []byte
 }
@@ -263,13 +378,34 @@ func (f *ulogFixture) rawMessage(t *testing.T, messageType wire.MessageType, pay
 	if len(payload) > math.MaxUint16 {
 		t.Fatalf("payload size %d exceeds ULog limit", len(payload))
 	}
-	header := wire.MessageHeader{Size: uint16(len(payload)), Type: messageType} // #nosec G115 -- bounded above.
+	f.rawMessageHeader(t, messageType, uint16(len(payload))) // #nosec G115 -- bounded above.
+	f.data = append(f.data, payload...)
+}
+
+func (f *ulogFixture) rawMessageHeader(t *testing.T, messageType wire.MessageType, size uint16) {
+	t.Helper()
+	header := wire.MessageHeader{Size: size, Type: messageType}
 	var err error
 	f.data, err = binary.Append(f.data, binary.LittleEndian, header)
 	if err != nil {
 		t.Fatalf("append message header: %v", err)
 	}
-	f.data = append(f.data, payload...)
+}
+
+func (f *ulogFixture) setAppendedOffsets(t *testing.T, offsets ...uint64) {
+	t.Helper()
+	if len(offsets) > len(wire.FlagBitsMessage{}.AppendedOffsets) {
+		t.Fatalf("got %d appended offsets, maximum is %d", len(offsets), len(wire.FlagBitsMessage{}.AppendedOffsets))
+	}
+
+	flags := wire.FlagBitsMessage{IncompatibilityFlags: wire.IncompatibilityFlagDataAppended}
+	copy(flags.AppendedOffsets[:], offsets)
+	payload, err := binary.Append(nil, binary.LittleEndian, flags)
+	if err != nil {
+		t.Fatalf("append flag bits: %v", err)
+	}
+	payloadOffset := binary.Size(wire.FileHeader{}) + binary.Size(wire.MessageHeader{})
+	copy(f.data[payloadOffset:payloadOffset+len(payload)], payload)
 }
 
 func (f *ulogFixture) bytes() []byte {
